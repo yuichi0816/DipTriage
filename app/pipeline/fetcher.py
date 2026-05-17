@@ -102,31 +102,31 @@ def get_nikkei225_symbols() -> list[StockInfo]:
             if code_col is None:
                 continue
 
-                name_col = None
-                for c in df.columns:
-                    if "name" in str(c).lower() or "company" in str(c).lower():
-                        name_col = c
-                        break
+            name_col = None
+            for c in df.columns:
+                if "name" in str(c).lower() or "company" in str(c).lower():
+                    name_col = c
+                    break
 
-                result = []
-                for _, row in df.iterrows():
-                    code = str(row[code_col]).strip().zfill(4)
-                    if not code.isdigit():
-                        continue
-                    symbol = f"{code}.T"
-                    name = str(row[name_col]) if name_col else symbol
-                    result.append(StockInfo(
-                        symbol=symbol,
-                        name=name,
-                        market="JP",
-                        exchange="TSE",
-                        sector=None,
-                        sector_etf=None,
-                        index_name="Nikkei225",
-                    ))
-                if result:
-                    logger.info("Nikkei 225: %d symbols fetched", len(result))
-                    return result
+            result = []
+            for _, row in df.iterrows():
+                code = str(row[code_col]).strip().zfill(4)
+                if not code.isdigit():
+                    continue
+                symbol = f"{code}.T"
+                name = str(row[name_col]) if name_col else symbol
+                result.append(StockInfo(
+                    symbol=symbol,
+                    name=name,
+                    market="JP",
+                    exchange="TSE",
+                    sector=None,
+                    sector_etf=None,
+                    index_name="Nikkei225",
+                ))
+            if result:
+                logger.info("Nikkei 225: %d symbols fetched", len(result))
+                return result
     except Exception as e:
         logger.error("Failed to fetch Nikkei 225 symbols: %s", e)
     return []

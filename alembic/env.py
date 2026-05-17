@@ -5,6 +5,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
+from app.config import DATABASE_URL
 from app.models import Base
 
 config = context.config
@@ -15,7 +16,8 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
+    # offline モードは同期 URL が必要なので +aiosqlite を除去する
+    url = DATABASE_URL.replace("+aiosqlite", "")
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -33,11 +35,8 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    # async engine は alembic.ini の URL を aiosqlite に置換して使う
     cfg = config.get_section(config.config_ini_section, {})
-    cfg["sqlalchemy.url"] = cfg["sqlalchemy.url"].replace(
-        "sqlite:///", "sqlite+aiosqlite:///"
-    )
+    cfg["sqlalchemy.url"] = DATABASE_URL  # app/config.py の絶対パスを使用
     connectable = async_engine_from_config(
         cfg,
         prefix="sqlalchemy.",

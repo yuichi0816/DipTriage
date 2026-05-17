@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert
@@ -56,11 +56,15 @@ async def get_price_changes(
     target_date: str,
     symbols: list[str] | None = None,
 ) -> list[DipCandidate]:
-    """DB の stock_prices から前日比を計算してスクリーニングする。"""
-    # target_date の直前2日分を取得
+    """DB の stock_prices から前日比・5日比を計算してスクリーニングする。"""
+    # 5営業日 = 最大7カレンダー日。14日を下限にして無制限スキャンを防ぐ
+    lower_bound = (
+        datetime.strptime(target_date, "%Y-%m-%d") - timedelta(days=14)
+    ).strftime("%Y-%m-%d")
+
     stmt = (
         select(StockPrice)
-        .where(StockPrice.date <= target_date)
+        .where(StockPrice.date >= lower_bound, StockPrice.date <= target_date)
         .order_by(StockPrice.symbol, StockPrice.date.desc())
     )
     if symbols:
@@ -69,11 +73,11 @@ async def get_price_changes(
     result = await session.execute(stmt)
     rows = result.scalars().all()
 
-    # シンボルごとに最新2日分を収集
+    # シンボルごとに最新7日分を収集（1d + 5d 計算に必要）
     sym_prices: dict[str, list[StockPrice]] = {}
     for row in rows:
         sym_prices.setdefault(row.symbol, [])
-        if len(sym_prices[row.symbol]) < 2:
+        if len(sym_prices[row.symbol]) < 7:
             sym_prices[row.symbol].append(row)
 
     candidates = []
@@ -84,10 +88,16 @@ async def get_price_changes(
         if today_price.date != target_date:
             continue
         change_1d = (today_price.close - prev_price.close) / prev_price.close * 100
+        change_5d = None
+        if len(prices) >= 6:
+            five_days_ago = prices[5]
+            if five_days_ago.close:
+                change_5d = (today_price.close - five_days_ago.close) / five_days_ago.close * 100
         candidates.append(DipCandidate(
             symbol=sym,
             trigger_date=target_date,
             change_pct_1d=change_1d,
+            change_pct_5d=change_5d,
         ))
 
     return candidates

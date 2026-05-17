@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import PIPELINE_HOUR, PIPELINE_MINUTE
 from app.database import init_db
 from app.pipeline.runner import run_daily_pipeline
-from app.routers import dashboard, dip_detail
+from app.routers import dashboard, dip_detail, watchlist
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,3 +42,4 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 app.include_router(dashboard.router)
 app.include_router(dip_detail.router)
+app.include_router(watchlist.router)

@@ -1,6 +1,7 @@
 """第2段階：数値分析（出来高異常度、ボラティリティ、β値、セクター相対等）"""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -41,12 +42,16 @@ async def _fetch_volume_series(session: AsyncSession, symbol: str, end_date: str
 
 def calculate_volume_ratio(volumes: list[float | None], window: int = 20) -> float | None:
     """当日出来高 / 過去 window 日平均出来高。"""
-    valid = [v for v in volumes if v is not None and v > 0]
-    if len(valid) < 2:
+    if not volumes:
         return None
-    today_vol = valid[0]
-    avg = np.mean(valid[1:window + 1]) if len(valid) > 1 else None
-    if not avg or avg == 0:
+    today_vol = volumes[0]
+    if today_vol is None or today_vol <= 0:
+        return None
+    historical = [v for v in volumes[1:] if v is not None and v > 0]
+    if len(historical) < 2:
+        return None
+    avg = float(np.mean(historical[:window]))
+    if avg == 0:
         return None
     return today_vol / avg
 
@@ -128,6 +133,9 @@ def score_idiosyncratic(
     if sector_corr_90d is not None:
         # 相関が低いほどスコアが高い（1 - corr）
         scores.append(max(0.0, 1.0 - abs(sector_corr_90d)))
+    if beta is not None:
+        # beta <= 0.5 → マクロ連動が低い → 銘柄固有性が高い（0〜1 にクリップ）
+        scores.append(max(0.0, min(1.0, 1.0 - beta / 2.0)))
     if not scores:
         return None, None
     score = float(np.mean(scores))
@@ -165,6 +173,13 @@ async def analyze_dip_event(
     market_index: str = "^GSPC",
 ) -> NumericalAnalysis | None:
     """1件の DipEvent に対して数値分析を実行し NumericalAnalysis を保存する。"""
+    existing_result = await session.execute(
+        select(NumericalAnalysis).where(NumericalAnalysis.dip_event_id == event.id).limit(1)
+    )
+    if existing_result.scalar_one_or_none():
+        logger.debug("Analysis already exists for dip_event_id=%d, skipping", event.id)
+        return None
+
     trigger_date = event.trigger_date
 
     # 出来高
@@ -196,8 +211,8 @@ async def analyze_dip_event(
     # 銘柄固有性スコア
     is_idiosyncratic, idiosyncratic_score = score_idiosyncratic(sector_relative, sector_corr_90d, beta)
 
-    # ファンダメンタルズ（API ヒット）
-    fundamentals = fetch_fundamentals(event.symbol)
+    # ファンダメンタルズ（同期 API をスレッドで実行してイベントループをブロックしない）
+    fundamentals = await asyncio.to_thread(fetch_fundamentals, event.symbol)
 
     now = datetime.now(timezone.utc).isoformat()
     analysis = NumericalAnalysis(
