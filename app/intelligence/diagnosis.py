@@ -157,6 +157,7 @@ async def run_diagnosis(
     parsed = parse_diagnosis_response(text)
 
     try:
+        now = datetime.now(timezone.utc).isoformat()
         await session.execute(
             update(Briefing)
             .where(Briefing.dip_event_id == event.id, Briefing.briefing_type == "diagnosis")
@@ -177,11 +178,12 @@ async def run_diagnosis(
             prompt_used=prompt,
             model_name=OLLAMA_MODEL_DIAGNOSIS,
             generation_sec=elapsed,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=now,
             is_latest=1,
         )
         session.add(briefing)
         event.status = "diagnosed"
+        event.updated_at = now
         await session.commit()
         return briefing
     except Exception as e:
