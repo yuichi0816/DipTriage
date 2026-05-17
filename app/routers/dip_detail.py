@@ -54,7 +54,13 @@ async def diagnose_dip(
 ):
     result = await session.execute(select(DipEvent).where(DipEvent.id == dip_id))
     event = result.scalar_one_or_none()
-    if not event or event.status not in ("interviewed", "diagnosed"):
+    if not event:
+        return templates.TemplateResponse(
+            request, "partials/diagnosis_result.html",
+            {"dip_id": dip_id, "diagnosis": None, "error": "イベントが見つかりません"},
+            status_code=404,
+        )
+    if event.status not in ("interviewed", "diagnosed"):
         return templates.TemplateResponse(
             request, "partials/diagnosis_result.html",
             {"dip_id": dip_id, "diagnosis": None, "error": "問診が完了していません"},
@@ -62,7 +68,7 @@ async def diagnose_dip(
         )
 
     ana_r = await session.execute(
-        select(NumericalAnalysis).where(NumericalAnalysis.dip_event_id == dip_id)
+        select(NumericalAnalysis).where(NumericalAnalysis.dip_event_id == dip_id).limit(1)
     )
     analysis = ana_r.scalar_one_or_none()
 
