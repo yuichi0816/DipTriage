@@ -146,4 +146,45 @@ async def run_diagnosis(
     articles: list[NewsArticle],
     meta: StockMeta | None = None,
 ) -> Briefing | None:
-    pass  # Task 3 で実装
+    prompt = build_diagnosis_prompt(event, analysis, interview, articles, meta)
+
+    try:
+        text, elapsed = await generate(prompt, model=OLLAMA_MODEL_DIAGNOSIS, think=True)
+    except Exception as e:
+        logger.error("Ollama diagnosis failed for %s: %s", event.symbol, e)
+        return None
+
+    parsed = parse_diagnosis_response(text)
+
+    try:
+        await session.execute(
+            update(Briefing)
+            .where(Briefing.dip_event_id == event.id, Briefing.briefing_type == "diagnosis")
+            .values(is_latest=0)
+        )
+
+        briefing = Briefing(
+            dip_event_id=event.id,
+            briefing_type="diagnosis",
+            situation_summary=interview.situation_summary,
+            initial_class=parsed.get("initial_class", "unknown"),
+            initial_class_jp=_CLASS_JP.get(parsed.get("initial_class", ""), "不明"),
+            accident_subtype=parsed.get("accident_subtype"),
+            moat_json=parsed.get("moat_json"),
+            counterarguments=parsed.get("counterarguments", ""),
+            confidence=parsed.get("confidence", "low"),
+            full_text=parsed.get("full_text", ""),
+            prompt_used=prompt,
+            model_name=OLLAMA_MODEL_DIAGNOSIS,
+            generation_sec=elapsed,
+            created_at=datetime.now(timezone.utc).isoformat(),
+            is_latest=1,
+        )
+        session.add(briefing)
+        event.status = "diagnosed"
+        await session.commit()
+        return briefing
+    except Exception as e:
+        await session.rollback()
+        logger.error("DB save failed for diagnosis %s: %s", event.symbol, e)
+        return None

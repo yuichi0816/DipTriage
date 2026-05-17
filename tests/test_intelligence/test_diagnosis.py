@@ -1,7 +1,10 @@
 import json
 import pytest
-from unittest.mock import MagicMock
-from app.intelligence.diagnosis import build_diagnosis_prompt, parse_diagnosis_response
+from unittest.mock import MagicMock, patch
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+from app.models.stock import Base
+from app.intelligence.diagnosis import build_diagnosis_prompt, parse_diagnosis_response, run_diagnosis
 
 
 # Fixture classes created with __new__ to validate schema at construction time
@@ -184,3 +187,109 @@ def test_parse_diagnosis_response_partial_json_fills_fallback():
     assert result["confidence"] == "high"
     assert result["accident_subtype"] is None
     assert result["full_text"] == ""
+
+
+@pytest.fixture
+async def db_session():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        yield s
+    await engine.dispose()
+
+
+async def _seed_db(session) -> tuple:
+    from app.models.dip import DipEvent
+    from app.models.briefing import Briefing
+    event = DipEvent(
+        symbol="CRWD", detected_date="2024-07-19", trigger_date="2024-07-19",
+        change_pct_1d=-11.2, change_pct_5d=-8.7,
+        status="interviewed", macro_flag=0,
+        created_at="2024-07-19T00:00:00", updated_at="2024-07-19T00:00:00",
+    )
+    session.add(event)
+    await session.flush()
+    interview = Briefing(
+        dip_event_id=event.id, briefing_type="interview",
+        situation_summary="BSOD障害", initial_class="accident",
+        initial_class_jp="事故型", is_latest=1,
+        created_at="2024-07-20T00:00:00",
+    )
+    session.add(interview)
+    await session.commit()
+    return event, interview
+
+
+def _mock_llm_response() -> str:
+    return json.dumps({
+        "initial_class": "accident",
+        "accident_subtype": "システム障害",
+        "moat_switching_cost": "高",
+        "moat_network_effect": "有",
+        "moat_regulatory_barrier": "中",
+        "moat_brand_dependency": "中",
+        "moat_summary": "毀損度 低",
+        "similar_cases": "Meta 2021",
+        "counterarguments": "1. a\n2. b\n3. c",
+        "oversight_risks": "訴訟リスク",
+        "confidence": "medium",
+        "confidence_reason": "複数一致",
+        "full_text": "━━ 診断ブリーフィング ━━\n...",
+    }, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_run_diagnosis_creates_briefing(db_session):
+    event, interview = await _seed_db(db_session)
+
+    with patch("app.intelligence.diagnosis.generate", return_value=(_mock_llm_response(), 15.3)):
+        result = await run_diagnosis(db_session, event, None, interview, [])
+
+    assert result is not None
+    assert result.briefing_type == "diagnosis"
+    assert result.initial_class == "accident"
+    assert result.accident_subtype == "システム障害"
+    assert result.confidence == "medium"
+    assert result.generation_sec == pytest.approx(15.3)
+    assert result.model_name is not None
+    moat = json.loads(result.moat_json)
+    assert moat["switching_cost"] == "高"
+
+
+@pytest.mark.asyncio
+async def test_run_diagnosis_updates_event_status(db_session):
+    event, interview = await _seed_db(db_session)
+
+    with patch("app.intelligence.diagnosis.generate", return_value=(_mock_llm_response(), 10.0)):
+        await run_diagnosis(db_session, event, None, interview, [])
+
+    await db_session.refresh(event)
+    assert event.status == "diagnosed"
+
+
+@pytest.mark.asyncio
+async def test_run_diagnosis_ollama_failure_returns_none(db_session):
+    event, interview = await _seed_db(db_session)
+
+    with patch("app.intelligence.diagnosis.generate", side_effect=Exception("Connection refused")):
+        result = await run_diagnosis(db_session, event, None, interview, [])
+
+    assert result is None
+    await db_session.refresh(event)
+    assert event.status == "interviewed"
+
+
+@pytest.mark.asyncio
+async def test_run_diagnosis_second_run_updates_is_latest(db_session):
+    event, interview = await _seed_db(db_session)
+
+    with patch("app.intelligence.diagnosis.generate", return_value=(_mock_llm_response(), 10.0)):
+        first = await run_diagnosis(db_session, event, None, interview, [])
+    with patch("app.intelligence.diagnosis.generate", return_value=(_mock_llm_response(), 12.0)):
+        second = await run_diagnosis(db_session, event, None, interview, [])
+
+    await db_session.refresh(first)
+    assert first.is_latest == 0
+    assert second.is_latest == 1
