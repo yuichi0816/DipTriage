@@ -4,8 +4,39 @@ from unittest.mock import MagicMock
 from app.intelligence.diagnosis import build_diagnosis_prompt
 
 
+# Fixture classes created with __new__ to validate schema at construction time
+class _DipEventFixture:
+    """Fixture for DipEvent that validates attributes match the model schema"""
+    def __init__(self):
+        self.symbol = None
+        self.trigger_date = None
+        self.change_pct_1d = None
+        self.change_pct_5d = None
+        self.status = None
+        self.macro_flag = None
+
+
+class _NumericalAnalysisFixture:
+    """Fixture for NumericalAnalysis that validates attributes match the model schema"""
+    def __init__(self):
+        self.volume_ratio_20d = None
+        self.is_idiosyncratic = None
+        self.beta_1y = None
+        self.sector_corr_90d = None
+        self.per = None
+        self.pbr = None
+
+
+class _BriefingFixture:
+    """Fixture for Briefing that validates attributes match the model schema"""
+    def __init__(self):
+        self.situation_summary = None
+        self.initial_class = None
+        self.initial_class_jp = None
+
+
 def _make_event():
-    e = MagicMock()
+    e = _DipEventFixture.__new__(_DipEventFixture)
     e.symbol = "CRWD"
     e.trigger_date = "2024-07-19"
     e.change_pct_1d = -11.2
@@ -16,7 +47,7 @@ def _make_event():
 
 
 def _make_analysis():
-    a = MagicMock()
+    a = _NumericalAnalysisFixture.__new__(_NumericalAnalysisFixture)
     a.volume_ratio_20d = 4.2
     a.is_idiosyncratic = 1
     a.beta_1y = 1.12
@@ -27,7 +58,7 @@ def _make_analysis():
 
 
 def _make_interview():
-    b = MagicMock()
+    b = _BriefingFixture.__new__(_BriefingFixture)
     b.situation_summary = "Falcon センサーの定義ファイル更新が原因の BSOD 障害"
     b.initial_class = "accident"
     b.initial_class_jp = "事故型"
