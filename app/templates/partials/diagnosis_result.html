@@ -1,0 +1,23 @@
+<div id="diagnosis-container">
+  {% if error %}
+  <p class="text-red-400 text-sm py-2">{{ error }}</p>
+  <button
+    hx-post="/dip/{{ dip_id }}/diagnose"
+    hx-target="#diagnosis-container"
+    hx-swap="outerHTML"
+    hx-indicator="#diagnosis-spinner"
+    class="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg"
+  >再試行</button>
+  <span id="diagnosis-spinner" class="htmx-indicator ml-2 text-sm text-gray-400">分析中...</span>
+  {% else %}
+  <section class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+    <div class="flex justify-between items-center mb-3">
+      <h2 class="text-sm font-semibold text-gray-400">診断ブリーフィング</h2>
+      <span class="text-xs text-gray-500">
+        {{ diagnosis.model_name }} / {{ "%.1f"|format(diagnosis.generation_sec or 0) }}s
+      </span>
+    </div>
+    <pre class="text-xs text-gray-300 whitespace-pre-wrap font-sans leading-relaxed">{{ diagnosis.full_text }}</pre>
+  </section>
+  {% endif %}
+</div>
