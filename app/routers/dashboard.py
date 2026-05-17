@@ -5,7 +5,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import DipEvent, NumericalAnalysis, StockMeta
+from app.models import Briefing, DipEvent, NumericalAnalysis, StockMeta
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -40,8 +40,22 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_db)):
     )
     meta_map: dict[str, StockMeta] = {m.symbol: m for m in meta_result.scalars().all()}
 
+    event_ids = [e.id for e in events]
+    interviews: dict[int, Briefing] = {}
+    if event_ids:
+        br_result = await session.execute(
+            select(Briefing)
+            .where(
+                Briefing.dip_event_id.in_(event_ids),
+                Briefing.briefing_type == "interview",
+                Briefing.is_latest == 1,
+            )
+        )
+        interviews = {b.dip_event_id: b for b in br_result.scalars().all()}
+
     return templates.TemplateResponse(request, "dashboard.html", {
         "events": events,
         "analyses": analyses,
         "meta_map": meta_map,
+        "interviews": interviews,
     })

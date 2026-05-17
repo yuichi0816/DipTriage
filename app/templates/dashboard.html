@@ -48,8 +48,18 @@
         <span class="bg-yellow-900 text-yellow-300 px-2 py-0.5 rounded">マクロ要因あり</span>
         {% endif %}
 
-        {# Phase 2 以降で事故/事件ラベルをここに追加 #}
-        <span class="bg-gray-800 text-gray-500 px-2 py-0.5 rounded">{{ event.status }}</span>
+        {% set interview = interviews.get(event.id) %}
+        {% if interview %}
+          {% if interview.initial_class == 'accident' %}
+            <span class="bg-green-900 text-green-300 px-2 py-0.5 rounded">事故型</span>
+          {% elif interview.initial_class == 'incident' %}
+            <span class="bg-red-900 text-red-300 px-2 py-0.5 rounded">事件型</span>
+          {% else %}
+            <span class="bg-gray-700 text-gray-400 px-2 py-0.5 rounded">不明</span>
+          {% endif %}
+        {% else %}
+          <span class="bg-gray-800 text-gray-500 px-2 py-0.5 rounded">{{ event.status }}</span>
+        {% endif %}
       </div>
     </div>
   </a>

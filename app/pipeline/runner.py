@@ -4,12 +4,14 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import nullslast, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.config import INDEX_SYMBOLS
 from app.database import AsyncSessionLocal
-from app.models import DipEvent, IndexPrice, StockMeta, StockPrice
+from app.intelligence.interview import run_interview
+from app.intelligence.news_fetcher import fetch_and_save_news
+from app.models import DipEvent, IndexPrice, NewsArticle, NumericalAnalysis, StockMeta, StockPrice
 from app.pipeline.analyzer import analyze_dip_event
 from app.pipeline.detector import apply_macro_filter, get_price_changes, save_dip_events, screen_dips
 from app.pipeline.fetcher import (
@@ -140,7 +142,42 @@ async def run_daily_pipeline(target_date: str | None = None) -> dict:
             except Exception as e:
                 logger.error("Analysis failed for %s: %s", event.symbol, e)
 
-        # ── ステータス更新 ──
+        # ── 第3段階a: ニュース取得 ──
+        non_macro_events = [e for e in dip_events if not e.macro_flag]
+        logger.info("Stage 3a: Fetching news for %d non-macro dips", len(non_macro_events))
+        for event in non_macro_events:
+            try:
+                articles = await fetch_and_save_news(session, event)
+                stats["news_fetched"] = stats.get("news_fetched", 0) + len(articles)
+            except Exception as e:
+                logger.warning("News fetch failed for %s: %s", event.symbol, e)
+
+        # ── 第3段階b: LLM 問診 ──
+        logger.info("Stage 3b: Running interview for %d dips", len(non_macro_events))
+        stats["dips_interviewed"] = 0
+        for event in non_macro_events:
+            news_result = await session.execute(
+                select(NewsArticle)
+                .where(NewsArticle.dip_event_id == event.id, NewsArticle.is_duplicate == 0)
+                .order_by(nullslast(NewsArticle.before_trigger.desc()), NewsArticle.published_at.desc())
+                .limit(10)
+            )
+            articles = news_result.scalars().all()
+            if not articles:
+                logger.warning("No news for %s, skipping interview", event.symbol)
+                continue
+
+            ana_result = await session.execute(
+                select(NumericalAnalysis).where(NumericalAnalysis.dip_event_id == event.id).limit(1)
+            )
+            analysis = ana_result.scalar_one_or_none()
+            meta = sym_to_meta.get(event.symbol)
+
+            briefing = await run_interview(session, event, analysis, articles, meta=meta)
+            if briefing:
+                stats["dips_interviewed"] += 1
+
+        # ── ステータス更新（analyzed）: macro_flag を問わず全 dip を analyzed に ──
         await session.execute(
             update(DipEvent)
             .where(DipEvent.detected_date == target_date, DipEvent.status == "detected")
