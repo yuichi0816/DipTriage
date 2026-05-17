@@ -116,7 +116,26 @@ def build_diagnosis_prompt(
 
 
 def parse_diagnosis_response(text: str) -> dict:
-    pass  # Task 2 で実装
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        parsed = {}
+    else:
+        try:
+            parsed = json.loads(m.group())
+        except json.JSONDecodeError:
+            parsed = {}
+
+    result = {**_FALLBACK, **{k: v for k, v in parsed.items() if k in _FALLBACK}}
+
+    moat = json.dumps({
+        "switching_cost": result.pop("moat_switching_cost", "N/A"),
+        "network_effect": result.pop("moat_network_effect", "N/A"),
+        "regulatory_barrier": result.pop("moat_regulatory_barrier", "N/A"),
+        "brand_dependency": result.pop("moat_brand_dependency", "N/A"),
+        "summary": result.pop("moat_summary", ""),
+    }, ensure_ascii=False)
+    result["moat_json"] = moat
+    return result
 
 
 async def run_diagnosis(

@@ -1,7 +1,7 @@
 import json
 import pytest
 from unittest.mock import MagicMock
-from app.intelligence.diagnosis import build_diagnosis_prompt
+from app.intelligence.diagnosis import build_diagnosis_prompt, parse_diagnosis_response
 
 
 # Fixture classes created with __new__ to validate schema at construction time
@@ -124,3 +124,63 @@ def test_build_diagnosis_prompt_requests_json_output():
     assert "moat_switching_cost" in prompt
     assert "counterarguments" in prompt
     assert "full_text" in prompt
+
+
+def _make_valid_json() -> str:
+    return json.dumps({
+        "initial_class": "accident",
+        "accident_subtype": "システム障害",
+        "moat_switching_cost": "高",
+        "moat_network_effect": "有",
+        "moat_regulatory_barrier": "中",
+        "moat_brand_dependency": "中",
+        "moat_summary": "毀損度 低。顧客離脱しにくい構造。",
+        "similar_cases": "Meta 2021-10 大規模障害: 数日で回復",
+        "counterarguments": "1. 構造的欠陥の可能性\n2. 訴訟リスク\n3. 顧客離脱リスク",
+        "oversight_risks": "訴訟規模が想定を超えるリスク",
+        "confidence": "medium",
+        "confidence_reason": "複数ニュースソースが一致",
+        "full_text": "━━ 診断ブリーフィング ━━\n...",
+    }, ensure_ascii=False)
+
+
+def test_parse_diagnosis_response_valid_json():
+    result = parse_diagnosis_response(_make_valid_json())
+    assert result["initial_class"] == "accident"
+    assert result["accident_subtype"] == "システム障害"
+    assert result["confidence"] == "medium"
+    assert result["full_text"] == "━━ 診断ブリーフィング ━━\n..."
+
+
+def test_parse_diagnosis_response_builds_moat_json():
+    result = parse_diagnosis_response(_make_valid_json())
+    moat = json.loads(result["moat_json"])
+    assert moat["switching_cost"] == "高"
+    assert moat["network_effect"] == "有"
+    assert moat["regulatory_barrier"] == "中"
+    assert moat["brand_dependency"] == "中"
+    assert "毀損度" in moat["summary"]
+
+
+def test_parse_diagnosis_response_json_in_markdown_fence():
+    wrapped = "思考中...\n```json\n" + _make_valid_json() + "\n```\n以上です。"
+    result = parse_diagnosis_response(wrapped)
+    assert result["initial_class"] == "accident"
+
+
+def test_parse_diagnosis_response_invalid_json_returns_fallback():
+    result = parse_diagnosis_response("これはJSONではありません")
+    assert result["initial_class"] == "unknown"
+    assert result["full_text"] == ""
+    assert result["confidence"] == "low"
+    moat = json.loads(result["moat_json"])
+    assert moat["switching_cost"] == "N/A"
+
+
+def test_parse_diagnosis_response_partial_json_fills_fallback():
+    partial = json.dumps({"initial_class": "incident", "confidence": "high"})
+    result = parse_diagnosis_response(partial)
+    assert result["initial_class"] == "incident"
+    assert result["confidence"] == "high"
+    assert result["accident_subtype"] is None
+    assert result["full_text"] == ""
