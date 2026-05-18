@@ -12,6 +12,7 @@ from app.database import AsyncSessionLocal
 from app.intelligence.interview import run_interview
 from app.intelligence.news_fetcher import fetch_and_save_news
 from app.models import DipEvent, IndexPrice, NewsArticle, NumericalAnalysis, StockMeta, StockPrice
+from app.models.watchlist import WatchlistEntry, WatchlistSnapshot
 from app.pipeline.analyzer import analyze_dip_event
 from app.pipeline.detector import apply_macro_filter, get_price_changes, save_dip_events, screen_dips
 from app.pipeline.fetcher import (
@@ -73,6 +74,44 @@ async def _save_index_prices(session, index_rows) -> None:
             change_pct=row.change_pct,
         ).on_conflict_do_nothing(index_elements=["symbol", "date"])
         await session.execute(stmt)
+    await session.commit()
+
+
+async def snapshot_watching_entries(session, today: str) -> None:
+    """Stage 4: watching 中エントリの日次スナップショットを保存する。"""
+    result = await session.execute(
+        select(WatchlistEntry).where(WatchlistEntry.status == "watching")
+    )
+    entries = result.scalars().all()
+
+    for entry in entries:
+        price_r = await session.execute(
+            select(StockPrice)
+            .where(StockPrice.symbol == entry.symbol)
+            .order_by(StockPrice.date.desc())
+            .limit(1)
+        )
+        price_rec = price_r.scalar_one_or_none()
+        if not price_rec:
+            logger.warning("No price data for watchlist entry %s (%s)", entry.id, entry.symbol)
+            continue
+
+        close_price = price_rec.close
+        recovery_pct = (
+            (close_price - entry.trigger_price) / entry.trigger_price * 100
+            if entry.trigger_price
+            else 0.0
+        )
+
+        stmt = sqlite_insert(WatchlistSnapshot).values(
+            watchlist_entry_id=entry.id,
+            snapshot_date=today,
+            close_price=close_price,
+            recovery_pct=recovery_pct,
+            new_news_count=0,
+        ).on_conflict_do_nothing()
+        await session.execute(stmt)
+
     await session.commit()
 
 
@@ -184,6 +223,13 @@ async def run_daily_pipeline(target_date: str | None = None) -> dict:
             .values(status="analyzed", updated_at=datetime.now(timezone.utc).isoformat())
         )
         await session.commit()
+
+        # ── 第4段階：ウォッチリスト スナップショット ──
+        logger.info("Stage 4: Snapshotting watching entries")
+        try:
+            await snapshot_watching_entries(session, target_date)
+        except Exception as e:
+            logger.error("Snapshot failed: %s", e)
 
     logger.info("=== Pipeline done: %s ===", stats)
     return stats

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -6,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.intelligence.diagnosis import run_diagnosis
-from app.models import Briefing, DipEvent, NumericalAnalysis, StockMeta
+from app.models import Briefing, DipEvent, NumericalAnalysis, StockMeta, StockPrice
 from app.models.news import NewsArticle
+from app.models.watchlist import WatchlistEntry
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -37,12 +40,20 @@ async def dip_detail(dip_id: int, request: Request, session: AsyncSession = Depe
     interview = next((b for b in briefings if b.briefing_type == "interview"), None)
     diagnosis = next((b for b in briefings if b.briefing_type == "diagnosis"), None)
 
+    wl_result = await session.execute(
+        select(WatchlistEntry)
+        .where(WatchlistEntry.dip_event_id == dip_id, WatchlistEntry.status == "watching")
+        .limit(1)
+    )
+    watchlist_entry = wl_result.scalar_one_or_none()
+
     return templates.TemplateResponse(request, "dip_detail.html", {
         "event": event,
         "analysis": analysis,
         "meta": meta,
         "interview": interview,
         "diagnosis": diagnosis,
+        "watchlist_entry": watchlist_entry,
     })
 
 
@@ -105,3 +116,50 @@ async def diagnose_dip(
             "error": None if diagnosis else "診断に失敗しました。Ollama が起動しているか確認してください。",
         },
     )
+
+
+@router.post("/dip/{dip_id}/watchlist", response_class=HTMLResponse)
+async def add_to_watchlist(
+    dip_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    result = await session.execute(select(DipEvent).where(DipEvent.id == dip_id))
+    event = result.scalar_one_or_none()
+    if not event:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    existing_r = await session.execute(
+        select(WatchlistEntry)
+        .where(WatchlistEntry.dip_event_id == dip_id, WatchlistEntry.status == "watching")
+        .limit(1)
+    )
+    existing = existing_r.scalar_one_or_none()
+    if existing:
+        return templates.TemplateResponse(request, "partials/watchlist_button.html", {
+            "entry": existing,
+            "dip_id": dip_id,
+        })
+
+    price_r = await session.execute(
+        select(StockPrice)
+        .where(StockPrice.symbol == event.symbol, StockPrice.date == event.trigger_date)
+        .limit(1)
+    )
+    price_rec = price_r.scalar_one_or_none()
+    trigger_price = price_rec.close if price_rec else 0.0
+
+    entry = WatchlistEntry(
+        dip_event_id=dip_id,
+        symbol=event.symbol,
+        added_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        trigger_price=trigger_price,
+        status="watching",
+    )
+    session.add(entry)
+    await session.commit()
+
+    return templates.TemplateResponse(request, "partials/watchlist_button.html", {
+        "entry": entry,
+        "dip_id": dip_id,
+    })
