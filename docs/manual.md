@@ -20,7 +20,10 @@ ollama pull qwen3.6:35b   # 診断用（精度高い・数分かかる）
 
 ### 2. Web サーバーを起動する
 
-```bash
+```powershell
+# まずプロジェクトディレクトリに移動する
+cd "C:\Users\yuich\OneDrive\ドキュメント\GitHub\DipTriage"
+
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
