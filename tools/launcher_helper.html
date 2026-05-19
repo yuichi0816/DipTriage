@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Server Launcher Helper</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  min-height: 100vh;
+  padding: 24px 16px;
+}
+
+.container { max-width: 760px; margin: 0 auto; }
+
+h1 {
+  font-size: 1.3rem;
+  color: #7c83fd;
+  margin-bottom: 20px;
+  letter-spacing: 0.02em;
+}
+
+h2 {
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8080a0;
+  margin-bottom: 14px;
+}
+
+.card {
+  background: #16213e;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+
+/* Status dots */
+.dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot-running { background: #4ade80; animation: pulse 2s infinite; }
+.dot-stopped { background: #f87171; }
+.dot-unknown { background: #606080; }
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.4); }
+  50%       { box-shadow: 0 0 0 5px rgba(74, 222, 128, 0); }
+}
+
+/* Row */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid #2a2a4a;
+}
+.row:last-child { border-bottom: none; }
+
+.row-name  { flex: 1; font-weight: 500; }
+.row-port  { color: #7c83fd; font-size: 0.82rem; min-width: 52px; }
+.row-status { font-size: 0.8rem; min-width: 52px; }
+.status-running { color: #4ade80; }
+.status-stopped { color: #f87171; }
+.status-unknown { color: #808080; }
+
+/* Buttons */
+.btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  transition: opacity 0.15s;
+}
+.btn:hover { opacity: 0.75; }
+.btn-primary  { background: #7c83fd; color: #fff; }
+.btn-secondary { background: #252540; color: #c0c0e0; border: 1px solid #3a3a5a; }
+.btn-danger   { background: #f87171; color: #fff; }
+
+.btn-row { display: flex; gap: 6px; }
+
+/* Forms */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.form-group { display: flex; flex-direction: column; gap: 4px; }
+.form-group.full { grid-column: 1 / -1; }
+
+label { font-size: 0.78rem; color: #9090b0; }
+
+input, select, textarea {
+  background: #0f0f23;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  padding: 6px 8px;
+  font-size: 0.88rem;
+  font-family: inherit;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: #7c83fd;
+}
+
+.error { color: #f87171; font-size: 0.78rem; margin-top: 2px; }
+
+/* Generator */
+.type-selector { display: flex; gap: 10px; margin-bottom: 12px; }
+.type-btn {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  background: #0f0f23;
+  color: #c0c0e0;
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-align: center;
+  transition: all 0.15s;
+}
+.type-btn.active-start { border-color: #4ade80; background: #0a1f12; color: #4ade80; }
+.type-btn.active-stop  { border-color: #f87171; background: #1f0a0a; color: #f87171; }
+
+textarea.output {
+  width: 100%;
+  min-height: 130px;
+  font-family: 'Consolas', monospace;
+  font-size: 0.8rem;
+  resize: vertical;
+}
+
+.output-actions { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
+
+.empty { color: #505070; font-size: 0.88rem; padding: 12px 0; }
+
+/* Inline edit form */
+.edit-form {
+  background: #0f0f23;
+  border: 1px solid #3a3a5a;
+  border-radius: 6px;
+  padding: 12px;
+  margin: 6px 0;
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Server Launcher Helper</h1>
+
+  <!-- Section 1: Server Status -->
+  <section class="card" id="section-status">
+    <h2>Server Status</h2>
+    <div id="status-list"><p class="empty">No profiles registered.</p></div>
+  </section>
+
+  <!-- Section 2: Batch File Generator -->
+  <section class="card" id="section-generator">
+    <h2>Batch File Generator</h2>
+
+    <div class="form-group" style="margin-bottom:12px;">
+      <label>Profile</label>
+      <select id="gen-profile">
+        <option value="">— select a profile —</option>
+      </select>
+    </div>
+
+    <label>Type</label>
+    <div class="type-selector">
+      <button class="type-btn" id="type-start" onclick="selectType('start')">Start</button>
+      <button class="type-btn" id="type-stop"  onclick="selectType('stop')">Stop</button>
+    </div>
+
+    <button class="btn btn-primary" onclick="handleGenerate()" style="margin-bottom:12px;">Generate</button>
+
+    <div id="gen-output" style="display:none;">
+      <label>Generated batch file</label>
+      <textarea class="output" id="gen-content" readonly></textarea>
+      <div class="output-actions">
+        <button class="btn btn-secondary" onclick="copyBatch()">Copy</button>
+        <button class="btn btn-primary" onclick="downloadBatch()">Download (.bat)</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 3: Profile Manager -->
+  <section class="card" id="section-profiles">
+    <h2>Profile Manager</h2>
+    <div id="profile-list"></div>
+
+    <h2 style="margin-top:18px;">Add Profile</h2>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Name *</label>
+        <input type="text" id="add-name" placeholder="DipTriage">
+      </div>
+      <div class="form-group">
+        <label>Port *</label>
+        <input type="number" id="add-port" placeholder="8000" min="1" max="65535">
+      </div>
+      <div class="form-group full">
+        <label>Work Directory *</label>
+        <input type="text" id="add-workdir" placeholder="C:\path\to\project">
+      </div>
+      <div class="form-group full">
+        <label>Start Command *</label>
+        <input type="text" id="add-command" placeholder="uv run uvicorn app.main:app --reload">
+      </div>
+      <div class="form-group full">
+        <label>Browser Path (optional)</label>
+        <input type="text" id="add-browserpath" placeholder="/dashboard">
+      </div>
+    </div>
+    <div id="add-error" class="error"></div>
+    <button class="btn btn-primary" onclick="handleAdd()" style="margin-top:4px;">Add</button>
+  </section>
+</div>
+<script>
+// JS goes here in subsequent tasks
+</script>
+</body>
+</html>
