@@ -495,13 +495,17 @@ function jumpToGenerator(profileId) {
 }
 
 // ── Batch generation ──────────────────────────────────
+function cmdEsc(str) {
+  return String(str).replace(/[\^&|<>]/g, '^$&');
+}
+
 function generateStartBatch(p) {
   const browserLine = p.browserPath
     ? `start "" "http://localhost:${p.port}${p.browserPath}"\r\n`
     : '';
   return `@echo off\r\n` +
          `cd /d "${p.workDir}"\r\n` +
-         `echo Starting ${p.name}...\r\n` +
+         `echo Starting ${cmdEsc(p.name)}...\r\n` +
          browserLine +
          `${p.command}\r\n` +
          `pause\r\n`;
@@ -509,7 +513,7 @@ function generateStartBatch(p) {
 
 function generateStopBatch(p) {
   return `@echo off\r\n` +
-         `echo Stopping ${p.name} on port ${p.port}...\r\n` +
+         `echo Stopping ${cmdEsc(p.name)} on port ${p.port}...\r\n` +
          `for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":${p.port} "') do (\r\n` +
          `    taskkill /F /PID %%a 2>nul\r\n` +
          `)\r\n` +
@@ -556,7 +560,9 @@ function downloadBatch() {
   const a    = document.createElement('a');
   a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
