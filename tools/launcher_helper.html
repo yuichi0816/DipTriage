@@ -288,7 +288,7 @@ function renderProfileList() {
   }
 
   el.innerHTML = profiles.map(p => profileRowHtml(p)).join('');
-  if (typeof syncGeneratorDropdown === 'function') syncGeneratorDropdown();
+  syncGeneratorDropdown();
 }
 
 function profileRowHtml(p) {
@@ -460,8 +460,43 @@ async function refreshStatuses() {
   renderStatusList();
 }
 
+// ── Generator ─────────────────────────────────────────
+let selectedType = null;
+
+function selectType(type) {
+  selectedType = type;
+  document.getElementById('type-start').className =
+    'type-btn' + (type === 'start' ? ' active-start' : '');
+  document.getElementById('type-stop').className =
+    'type-btn' + (type === 'stop' ? ' active-stop' : '');
+}
+
+function syncGeneratorDropdown() {
+  const sel = document.getElementById('gen-profile');
+  const current = sel.value;
+  const profiles = loadProfiles();
+
+  sel.innerHTML = '<option value="">— select a profile —</option>';
+  profiles.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = `${p.name}  (:${p.port})`;
+    sel.appendChild(opt);
+  });
+
+  if (profiles.find(p => p.id === current)) sel.value = current;
+}
+
+function jumpToGenerator(profileId) {
+  syncGeneratorDropdown();
+  document.getElementById('gen-profile').value = profileId;
+  document.getElementById('gen-output').style.display = 'none';
+  document.getElementById('section-generator').scrollIntoView({ behavior: 'smooth' });
+}
+
 // ── Init ──────────────────────────────────────────────
 renderProfileList();
+syncGeneratorDropdown();
 renderStatusList();
 refreshStatuses();
 setInterval(refreshStatuses, 10000);
