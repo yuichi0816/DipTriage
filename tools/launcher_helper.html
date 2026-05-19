@@ -228,7 +228,54 @@ textarea.output {
   </section>
 </div>
 <script>
-// JS goes here in subsequent tasks
+// ── Data ─────────────────────────────────────────────
+const STORAGE_KEY = 'launcher_profiles';
+
+function loadProfiles() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function saveProfiles(profiles) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
+  } catch {
+    console.warn('localStorage unavailable; profiles not persisted.');
+  }
+}
+
+function validateProfile(data) {
+  const errors = [];
+  if (!data.name.trim())    errors.push('Name is required.');
+  const port = parseInt(data.port, 10);
+  if (isNaN(port) || port < 1 || port > 65535)
+    errors.push('Port must be 1–65535.');
+  if (!data.workDir.trim())  errors.push('Work directory is required.');
+  if (!data.command.trim())  errors.push('Start command is required.');
+  return errors;
+}
+
+function addProfile(data) {
+  const profiles = loadProfiles();
+  profiles.push({ id: Date.now().toString(), ...data });
+  saveProfiles(profiles);
+  return profiles;
+}
+
+function updateProfile(id, data) {
+  const profiles = loadProfiles().map(p => p.id === id ? { id, ...data } : p);
+  saveProfiles(profiles);
+  return profiles;
+}
+
+function deleteProfile(id) {
+  const profiles = loadProfiles().filter(p => p.id !== id);
+  saveProfiles(profiles);
+  return profiles;
+}
 </script>
 </body>
 </html>
