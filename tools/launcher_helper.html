@@ -411,8 +411,60 @@ function handleDelete(id) {
   if (typeof renderStatusList === 'function') renderStatusList();
 }
 
+// ── Status detection ──────────────────────────────────
+const statusCache = {};
+
+async function checkStatus(port) {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2000);
+    await fetch(`http://localhost:${port}`, { mode: 'no-cors', signal: ctrl.signal });
+    clearTimeout(timer);
+    return 'running';
+  } catch {
+    return 'stopped';
+  }
+}
+
+function renderStatusList() {
+  const profiles = loadProfiles();
+  const el = document.getElementById('status-list');
+
+  if (profiles.length === 0) {
+    el.innerHTML = '<p class="empty">No profiles registered.</p>';
+    return;
+  }
+
+  el.innerHTML = profiles.map(p => {
+    const s = statusCache[p.id] || 'unknown';
+    const dotClass   = s === 'running' ? 'dot-running' : s === 'stopped' ? 'dot-stopped' : 'dot-unknown';
+    const labelClass = s === 'running' ? 'status-running' : s === 'stopped' ? 'status-stopped' : 'status-unknown';
+    const labelText  = s === 'running' ? 'Running' : s === 'stopped' ? 'Stopped' : '...';
+    return `<div class="row">
+      <span class="dot ${dotClass}"></span>
+      <span class="row-name">${esc(p.name)}</span>
+      <span class="row-port">:${p.port}</span>
+      <span class="row-status ${labelClass}">${labelText}</span>
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="jumpToGenerator('${p.id}')">Generate</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function refreshStatuses() {
+  const profiles = loadProfiles();
+  for (const p of profiles) {
+    statusCache[p.id] = await checkStatus(p.port);
+  }
+  renderStatusList();
+}
+
 // ── Init ──────────────────────────────────────────────
 renderProfileList();
+renderStatusList();
+refreshStatuses();
+setInterval(refreshStatuses, 10000);
 </script>
 </body>
 </html>
