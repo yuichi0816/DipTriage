@@ -1,0 +1,883 @@
+# Launcher Helper Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Build `tools/launcher_helper.html` — a standalone HTML app that manages localhost server profiles, shows live running status, and generates start/stop batch files.
+
+**Architecture:** Single HTML file with vanilla JS and CSS. Profiles stored in `localStorage`. Server status detected via `fetch` ping every 10 seconds. Batch file content is ASCII-only and downloaded as a UTF-8 `.bat` file.
+
+**Tech Stack:** HTML5, vanilla JS (ES2020), CSS custom properties, localStorage, Fetch API, AbortController, Blob API
+
+---
+
+## File Structure
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `tools/launcher_helper.html` | Create | Entire app — HTML structure, CSS, JS |
+
+---
+
+## Task 1: HTML Scaffold + CSS
+
+**Files:**
+- Create: `tools/launcher_helper.html`
+
+- [ ] **Step 1: Create the file with full scaffold**
+
+Create `tools/launcher_helper.html`:
+
+```html
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Server Launcher Helper</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  min-height: 100vh;
+  padding: 24px 16px;
+}
+
+.container { max-width: 760px; margin: 0 auto; }
+
+h1 {
+  font-size: 1.3rem;
+  color: #7c83fd;
+  margin-bottom: 20px;
+  letter-spacing: 0.02em;
+}
+
+h2 {
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8080a0;
+  margin-bottom: 14px;
+}
+
+.card {
+  background: #16213e;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+
+/* Status dots */
+.dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot-running { background: #4ade80; animation: pulse 2s infinite; }
+.dot-stopped { background: #f87171; }
+.dot-unknown { background: #606080; }
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.4); }
+  50%       { box-shadow: 0 0 0 5px rgba(74, 222, 128, 0); }
+}
+
+/* Row */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid #2a2a4a;
+}
+.row:last-child { border-bottom: none; }
+
+.row-name  { flex: 1; font-weight: 500; }
+.row-port  { color: #7c83fd; font-size: 0.82rem; min-width: 52px; }
+.row-status { font-size: 0.8rem; min-width: 52px; }
+.status-running { color: #4ade80; }
+.status-stopped { color: #f87171; }
+.status-unknown { color: #808080; }
+
+/* Buttons */
+.btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  transition: opacity 0.15s;
+}
+.btn:hover { opacity: 0.75; }
+.btn-primary  { background: #7c83fd; color: #fff; }
+.btn-secondary { background: #252540; color: #c0c0e0; border: 1px solid #3a3a5a; }
+.btn-danger   { background: #f87171; color: #fff; }
+
+.btn-row { display: flex; gap: 6px; }
+
+/* Forms */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.form-group { display: flex; flex-direction: column; gap: 4px; }
+.form-group.full { grid-column: 1 / -1; }
+
+label { font-size: 0.78rem; color: #9090b0; }
+
+input, select, textarea {
+  background: #0f0f23;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  padding: 6px 8px;
+  font-size: 0.88rem;
+  font-family: inherit;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: #7c83fd;
+}
+
+.error { color: #f87171; font-size: 0.78rem; margin-top: 2px; }
+
+/* Generator */
+.type-selector { display: flex; gap: 10px; margin-bottom: 12px; }
+.type-btn {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  background: #0f0f23;
+  color: #c0c0e0;
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-align: center;
+  transition: all 0.15s;
+}
+.type-btn.active-start { border-color: #4ade80; background: #0a1f12; color: #4ade80; }
+.type-btn.active-stop  { border-color: #f87171; background: #1f0a0a; color: #f87171; }
+
+textarea.output {
+  width: 100%;
+  min-height: 130px;
+  font-family: 'Consolas', monospace;
+  font-size: 0.8rem;
+  resize: vertical;
+}
+
+.output-actions { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
+
+.empty { color: #505070; font-size: 0.88rem; padding: 12px 0; }
+
+/* Inline edit form */
+.edit-form {
+  background: #0f0f23;
+  border: 1px solid #3a3a5a;
+  border-radius: 6px;
+  padding: 12px;
+  margin: 6px 0;
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Server Launcher Helper</h1>
+
+  <!-- Section 1: Server Status -->
+  <section class="card" id="section-status">
+    <h2>Server Status</h2>
+    <div id="status-list"><p class="empty">No profiles registered.</p></div>
+  </section>
+
+  <!-- Section 2: Batch File Generator -->
+  <section class="card" id="section-generator">
+    <h2>Batch File Generator</h2>
+
+    <div class="form-group" style="margin-bottom:12px;">
+      <label>Profile</label>
+      <select id="gen-profile">
+        <option value="">— select a profile —</option>
+      </select>
+    </div>
+
+    <label>Type</label>
+    <div class="type-selector">
+      <button class="type-btn" id="type-start" onclick="selectType('start')">Start</button>
+      <button class="type-btn" id="type-stop"  onclick="selectType('stop')">Stop</button>
+    </div>
+
+    <button class="btn btn-primary" onclick="handleGenerate()" style="margin-bottom:12px;">Generate</button>
+
+    <div id="gen-output" style="display:none;">
+      <label>Generated batch file</label>
+      <textarea class="output" id="gen-content" readonly></textarea>
+      <div class="output-actions">
+        <button class="btn btn-secondary" onclick="copyBatch()">Copy</button>
+        <button class="btn btn-primary" onclick="downloadBatch()">Download (.bat)</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 3: Profile Manager -->
+  <section class="card" id="section-profiles">
+    <h2>Profile Manager</h2>
+    <div id="profile-list"></div>
+
+    <h2 style="margin-top:18px;">Add Profile</h2>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Name *</label>
+        <input type="text" id="add-name" placeholder="DipTriage">
+      </div>
+      <div class="form-group">
+        <label>Port *</label>
+        <input type="number" id="add-port" placeholder="8000" min="1" max="65535">
+      </div>
+      <div class="form-group full">
+        <label>Work Directory *</label>
+        <input type="text" id="add-workdir" placeholder="C:\path\to\project">
+      </div>
+      <div class="form-group full">
+        <label>Start Command *</label>
+        <input type="text" id="add-command" placeholder="uv run uvicorn app.main:app --reload">
+      </div>
+      <div class="form-group full">
+        <label>Browser Path (optional)</label>
+        <input type="text" id="add-browserpath" placeholder="/dashboard">
+      </div>
+    </div>
+    <div id="add-error" class="error"></div>
+    <button class="btn btn-primary" onclick="handleAdd()" style="margin-top:4px;">Add</button>
+  </section>
+</div>
+<script>
+// JS goes here in subsequent tasks
+</script>
+</body>
+</html>
+```
+
+- [ ] **Step 2: Open in browser and verify layout**
+
+Double-click `tools/launcher_helper.html`. Verify:
+- Dark background, 3 cards visible
+- "No profiles registered." shown in Section 1
+- Add form visible in Section 3
+- No console errors
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tools/launcher_helper.html
+git commit -m "feat: add launcher helper HTML scaffold and CSS"
+```
+
+---
+
+## Task 2: localStorage Helpers + Data Model
+
+**Files:**
+- Modify: `tools/launcher_helper.html` — replace `// JS goes here` comment with data functions
+
+- [ ] **Step 1: Add data functions inside the `<script>` tag**
+
+Replace `// JS goes here in subsequent tasks` with:
+
+```js
+// ── Data ─────────────────────────────────────────────
+const STORAGE_KEY = 'launcher_profiles';
+
+function loadProfiles() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function saveProfiles(profiles) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
+  } catch {
+    console.warn('localStorage unavailable; profiles not persisted.');
+  }
+}
+
+function validateProfile(data) {
+  const errors = [];
+  if (!data.name.trim())    errors.push('Name is required.');
+  const port = parseInt(data.port, 10);
+  if (isNaN(port) || port < 1 || port > 65535)
+    errors.push('Port must be 1–65535.');
+  if (!data.workDir.trim())  errors.push('Work directory is required.');
+  if (!data.command.trim())  errors.push('Start command is required.');
+  return errors;
+}
+
+function addProfile(data) {
+  const profiles = loadProfiles();
+  profiles.push({ id: Date.now().toString(), ...data });
+  saveProfiles(profiles);
+  return profiles;
+}
+
+function updateProfile(id, data) {
+  const profiles = loadProfiles().map(p => p.id === id ? { id, ...data } : p);
+  saveProfiles(profiles);
+  return profiles;
+}
+
+function deleteProfile(id) {
+  const profiles = loadProfiles().filter(p => p.id !== id);
+  saveProfiles(profiles);
+  return profiles;
+}
+```
+
+- [ ] **Step 2: Verify in browser console**
+
+Open the file, open DevTools console, paste and run:
+```js
+addProfile({ name: 'Test', port: 3000, workDir: 'C:\\test', command: 'node server.js', browserPath: '' });
+console.log(loadProfiles()); // should show array with 1 item
+deleteProfile(loadProfiles()[0].id);
+console.log(loadProfiles()); // should show []
+```
+
+Expected: no errors, array operations work correctly.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tools/launcher_helper.html
+git commit -m "feat: add localStorage helpers for profile CRUD"
+```
+
+---
+
+## Task 3: Profile Manager — Render List + Add
+
+**Files:**
+- Modify: `tools/launcher_helper.html` — add rendering and add-form handler
+
+- [ ] **Step 1: Add rendering functions after the data functions**
+
+```js
+// ── Rendering ─────────────────────────────────────────
+function renderProfileList() {
+  const profiles = loadProfiles();
+  const el = document.getElementById('profile-list');
+
+  if (profiles.length === 0) {
+    el.innerHTML = '<p class="empty">No profiles yet.</p>';
+    return;
+  }
+
+  el.innerHTML = profiles.map(p => profileRowHtml(p)).join('');
+  syncGeneratorDropdown();
+}
+
+function profileRowHtml(p) {
+  return `<div class="row" id="profile-row-${p.id}">
+    <span class="row-name">${esc(p.name)}</span>
+    <span class="row-port">:${p.port}</span>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="startEdit('${p.id}')">Edit</button>
+      <button class="btn btn-danger"    onclick="handleDelete('${p.id}')">Delete</button>
+    </div>
+  </div>`;
+}
+
+function esc(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+```
+
+- [ ] **Step 2: Add the add-form handler**
+
+```js
+// ── Add profile ───────────────────────────────────────
+function handleAdd() {
+  const data = {
+    name:        document.getElementById('add-name').value,
+    port:        document.getElementById('add-port').value,
+    workDir:     document.getElementById('add-workdir').value,
+    command:     document.getElementById('add-command').value,
+    browserPath: document.getElementById('add-browserpath').value.trim(),
+  };
+
+  const errors = validateProfile(data);
+  document.getElementById('add-error').textContent = errors.join(' ');
+  if (errors.length) return;
+
+  data.port = parseInt(data.port, 10);
+  addProfile(data);
+
+  ['add-name','add-port','add-workdir','add-command','add-browserpath']
+    .forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('add-error').textContent = '';
+
+  renderProfileList();
+  renderStatusList();
+}
+```
+
+- [ ] **Step 3: Add init call at the bottom of the script**
+
+```js
+// ── Init ──────────────────────────────────────────────
+renderProfileList();
+```
+
+- [ ] **Step 4: Open browser, add a profile, verify it appears**
+
+Open the file. In Section 3, add:
+- Name: `DipTriage`, Port: `8000`, Work Dir: `C:\test`, Command: `uv run server`
+
+Click **Add**. Verify the row appears in the profile list. Refresh the page — profile should still be there (localStorage). Verify error shows when Name is blank.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add tools/launcher_helper.html
+git commit -m "feat: add profile list rendering and add form"
+```
+
+---
+
+## Task 4: Profile Manager — Inline Edit + Delete
+
+**Files:**
+- Modify: `tools/launcher_helper.html`
+
+- [ ] **Step 1: Add edit functions**
+
+```js
+// ── Edit profile ──────────────────────────────────────
+function startEdit(id) {
+  const p = loadProfiles().find(x => x.id === id);
+  if (!p) return;
+
+  document.getElementById(`profile-row-${id}`).outerHTML = `
+    <div class="edit-form" id="profile-row-${id}">
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Name *</label>
+          <input type="text" id="edit-name-${id}" value="${esc(p.name)}">
+        </div>
+        <div class="form-group">
+          <label>Port *</label>
+          <input type="number" id="edit-port-${id}" value="${p.port}" min="1" max="65535">
+        </div>
+        <div class="form-group full">
+          <label>Work Directory *</label>
+          <input type="text" id="edit-workdir-${id}" value="${esc(p.workDir)}">
+        </div>
+        <div class="form-group full">
+          <label>Start Command *</label>
+          <input type="text" id="edit-command-${id}" value="${esc(p.command)}">
+        </div>
+        <div class="form-group full">
+          <label>Browser Path</label>
+          <input type="text" id="edit-browserpath-${id}" value="${esc(p.browserPath || '')}">
+        </div>
+      </div>
+      <div id="edit-error-${id}" class="error"></div>
+      <div class="btn-row" style="margin-top:8px;">
+        <button class="btn btn-primary"   onclick="handleSave('${id}')">Save</button>
+        <button class="btn btn-secondary" onclick="cancelEdit('${id}')">Cancel</button>
+      </div>
+    </div>`;
+}
+
+function handleSave(id) {
+  const data = {
+    name:        document.getElementById(`edit-name-${id}`).value,
+    port:        document.getElementById(`edit-port-${id}`).value,
+    workDir:     document.getElementById(`edit-workdir-${id}`).value,
+    command:     document.getElementById(`edit-command-${id}`).value,
+    browserPath: document.getElementById(`edit-browserpath-${id}`).value.trim(),
+  };
+
+  const errors = validateProfile(data);
+  document.getElementById(`edit-error-${id}`).textContent = errors.join(' ');
+  if (errors.length) return;
+
+  data.port = parseInt(data.port, 10);
+  updateProfile(id, data);
+
+  document.getElementById(`profile-row-${id}`).outerHTML =
+    profileRowHtml(loadProfiles().find(p => p.id === id));
+
+  syncGeneratorDropdown();
+  renderStatusList();
+}
+
+function cancelEdit(id) {
+  const p = loadProfiles().find(x => x.id === id);
+  if (!p) return;
+  document.getElementById(`profile-row-${id}`).outerHTML = profileRowHtml(p);
+}
+```
+
+- [ ] **Step 2: Add delete handler**
+
+```js
+// ── Delete profile ────────────────────────────────────
+function handleDelete(id) {
+  const p = loadProfiles().find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(`Delete "${p.name}"?`)) return;
+  deleteProfile(id);
+  renderProfileList();
+  renderStatusList();
+}
+```
+
+- [ ] **Step 3: Open browser and verify edit/delete**
+
+Add a profile. Click **Edit** — row should expand into form fields pre-filled with existing values. Change Name, click **Save** — row should update. Click **Edit** again, click **Cancel** — row should restore. Click **Delete** — confirm dialog appears; after OK the row disappears.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add tools/launcher_helper.html
+git commit -m "feat: add inline profile edit and delete"
+```
+
+---
+
+## Task 5: Server Status Section + Fetch Ping
+
+**Files:**
+- Modify: `tools/launcher_helper.html`
+
+- [ ] **Step 1: Add status state + checkStatus function**
+
+```js
+// ── Status detection ──────────────────────────────────
+const statusCache = {};
+
+async function checkStatus(port) {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2000);
+    await fetch(`http://localhost:${port}`, { mode: 'no-cors', signal: ctrl.signal });
+    clearTimeout(timer);
+    return 'running';
+  } catch {
+    return 'stopped';
+  }
+}
+```
+
+- [ ] **Step 2: Add renderStatusList and refreshStatuses**
+
+```js
+function renderStatusList() {
+  const profiles = loadProfiles();
+  const el = document.getElementById('status-list');
+
+  if (profiles.length === 0) {
+    el.innerHTML = '<p class="empty">No profiles registered.</p>';
+    return;
+  }
+
+  el.innerHTML = profiles.map(p => {
+    const s = statusCache[p.id] || 'unknown';
+    const dotClass   = s === 'running' ? 'dot-running' : s === 'stopped' ? 'dot-stopped' : 'dot-unknown';
+    const labelClass = s === 'running' ? 'status-running' : s === 'stopped' ? 'status-stopped' : 'status-unknown';
+    const labelText  = s === 'running' ? 'Running' : s === 'stopped' ? 'Stopped' : '...';
+    return `<div class="row">
+      <span class="dot ${dotClass}"></span>
+      <span class="row-name">${esc(p.name)}</span>
+      <span class="row-port">:${p.port}</span>
+      <span class="row-status ${labelClass}">${labelText}</span>
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="jumpToGenerator('${p.id}')">Generate</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function refreshStatuses() {
+  const profiles = loadProfiles();
+  for (const p of profiles) {
+    statusCache[p.id] = await checkStatus(p.port);
+  }
+  renderStatusList();
+}
+```
+
+- [ ] **Step 3: Update init to start status refresh**
+
+Find the `// ── Init` block and update it:
+
+```js
+// ── Init ──────────────────────────────────────────────
+renderProfileList();
+renderStatusList();
+refreshStatuses();
+setInterval(refreshStatuses, 10000);
+```
+
+- [ ] **Step 4: Open browser and verify status display**
+
+Add a profile with port `8000`. The status dot should show grey ("...") initially, then red ("Stopped") after 2 seconds (since no server is running). If DipTriage is actually running, it should show green ("Running").
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add tools/launcher_helper.html
+git commit -m "feat: add server status section with fetch ping auto-refresh"
+```
+
+---
+
+## Task 6: Batch Generator — UI + Dropdown Sync
+
+**Files:**
+- Modify: `tools/launcher_helper.html`
+
+- [ ] **Step 1: Add generator state + dropdown sync**
+
+```js
+// ── Generator ─────────────────────────────────────────
+let selectedType = null;
+
+function selectType(type) {
+  selectedType = type;
+  document.getElementById('type-start').className =
+    'type-btn' + (type === 'start' ? ' active-start' : '');
+  document.getElementById('type-stop').className =
+    'type-btn' + (type === 'stop' ? ' active-stop' : '');
+}
+
+function syncGeneratorDropdown() {
+  const sel = document.getElementById('gen-profile');
+  const current = sel.value;
+  const profiles = loadProfiles();
+
+  sel.innerHTML = '<option value="">— select a profile —</option>';
+  profiles.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = `${p.name}  (:${p.port})`;
+    sel.appendChild(opt);
+  });
+
+  if (profiles.find(p => p.id === current)) sel.value = current;
+}
+```
+
+- [ ] **Step 2: Add jumpToGenerator (wires Section 1 Generate button)**
+
+```js
+function jumpToGenerator(profileId) {
+  syncGeneratorDropdown();
+  document.getElementById('gen-profile').value = profileId;
+  document.getElementById('gen-output').style.display = 'none';
+  document.getElementById('section-generator').scrollIntoView({ behavior: 'smooth' });
+}
+```
+
+- [ ] **Step 3: Update renderProfileList to also call syncGeneratorDropdown**
+
+Inside `renderProfileList()`, append at the end:
+```js
+  syncGeneratorDropdown();
+```
+
+- [ ] **Step 4: Update init block**
+
+```js
+// ── Init ──────────────────────────────────────────────
+renderProfileList();
+syncGeneratorDropdown();
+renderStatusList();
+refreshStatuses();
+setInterval(refreshStatuses, 10000);
+```
+
+- [ ] **Step 5: Open browser and verify dropdown**
+
+Add two profiles. Both should appear in the Section 2 dropdown. Click **Generate** in Section 1 — page should scroll to Section 2 with that profile pre-selected.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add tools/launcher_helper.html
+git commit -m "feat: add generator dropdown sync and jump-to-generator link"
+```
+
+---
+
+## Task 7: Batch Content Generation + Copy + Download
+
+**Files:**
+- Modify: `tools/launcher_helper.html`
+
+- [ ] **Step 1: Add batch content generators**
+
+```js
+// ── Batch generation ──────────────────────────────────
+function generateStartBatch(p) {
+  const browserLine = p.browserPath
+    ? `start "" "http://localhost:${p.port}${p.browserPath}"\r\n`
+    : '';
+  return `@echo off\r\n` +
+         `cd /d "${p.workDir}"\r\n` +
+         `echo Starting ${p.name}...\r\n` +
+         browserLine +
+         `${p.command}\r\n` +
+         `pause\r\n`;
+}
+
+function generateStopBatch(p) {
+  return `@echo off\r\n` +
+         `echo Stopping ${p.name} on port ${p.port}...\r\n` +
+         `for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":${p.port} "') do (\r\n` +
+         `    taskkill /F /PID %%a 2>nul\r\n` +
+         `)\r\n` +
+         `echo Done.\r\n` +
+         `pause\r\n`;
+}
+```
+
+- [ ] **Step 2: Add handleGenerate**
+
+```js
+function handleGenerate() {
+  const profileId = document.getElementById('gen-profile').value;
+  if (!profileId) { alert('Please select a profile.'); return; }
+  if (!selectedType) { alert('Please select Start or Stop.'); return; }
+
+  const p = loadProfiles().find(x => x.id === profileId);
+  if (!p) return;
+
+  const content = selectedType === 'start'
+    ? generateStartBatch(p)
+    : generateStopBatch(p);
+
+  document.getElementById('gen-content').value = content;
+  document.getElementById('gen-output').style.display = 'block';
+}
+```
+
+- [ ] **Step 3: Add copy and download handlers**
+
+```js
+function copyBatch() {
+  const text = document.getElementById('gen-content').value;
+  navigator.clipboard.writeText(text).then(() => {
+    alert('Copied to clipboard.');
+  }).catch(() => {
+    // fallback for file:// protocol
+    const ta = document.getElementById('gen-content');
+    ta.select();
+    document.execCommand('copy');
+    alert('Copied to clipboard.');
+  });
+}
+
+function downloadBatch() {
+  const content = document.getElementById('gen-content').value;
+  const profileId = document.getElementById('gen-profile').value;
+  const p = loadProfiles().find(x => x.id === profileId);
+  const filename = p ? `${selectedType}_${p.name}.bat` : `${selectedType}.bat`;
+
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+```
+
+- [ ] **Step 4: Open browser and test full generate flow**
+
+1. Add a profile: Name=`DipTriage`, Port=`8000`, WorkDir=`C:\test`, Command=`uv run uvicorn app.main:app --reload`, BrowserPath=`/dashboard`
+2. In Section 2, select the profile, click **Start**, click **Generate**
+3. Verify textarea shows correct ASCII-only bat content:
+   ```
+   @echo off
+   cd /d "C:\test"
+   echo Starting DipTriage...
+   start "" "http://localhost:8000/dashboard"
+   uv run uvicorn app.main:app --reload
+   pause
+   ```
+4. Click **Download (.bat)** — file `start_DipTriage.bat` should download
+5. Open the downloaded file in Notepad — verify no garbled characters
+6. Switch to **Stop**, click **Generate**, verify stop batch content
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add tools/launcher_helper.html
+git commit -m "feat: add batch content generation, copy and download"
+```
+
+---
+
+## Task 8: Final Polish + localStorage Unavailable Warning
+
+**Files:**
+- Modify: `tools/launcher_helper.html`
+
+- [ ] **Step 1: Add localStorage availability check to init**
+
+Find the `// ── Init` block and replace it:
+
+```js
+// ── Init ──────────────────────────────────────────────
+(function checkStorage() {
+  try {
+    localStorage.setItem('__test__', '1');
+    localStorage.removeItem('__test__');
+  } catch {
+    const warn = document.createElement('p');
+    warn.style.cssText = 'color:#f87171;font-size:0.82rem;margin-bottom:12px;';
+    warn.textContent = 'Warning: localStorage is unavailable. Profiles will not be saved.';
+    document.querySelector('.container').prepend(warn);
+  }
+})();
+
+renderProfileList();
+syncGeneratorDropdown();
+renderStatusList();
+refreshStatuses();
+setInterval(refreshStatuses, 10000);
+```
+
+- [ ] **Step 2: Open browser and do a full end-to-end walkthrough**
+
+1. Open `tools/launcher_helper.html` fresh (clear localStorage first via DevTools → Application → Clear storage)
+2. Verify "No profiles registered" and "No profiles yet" shown
+3. Add DipTriage profile with real paths from the project
+4. Verify profile appears in both Section 1 and Section 3
+5. Click **Generate** in Section 1 → scrolls to Section 2 with profile pre-selected
+6. Select Start, Generate, Download → check `.bat` file content
+7. Click Edit on profile → change Browser Path → Save → re-generate and verify updated content
+8. Refresh page → profile still present
+9. Delete profile → both sections clear
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tools/launcher_helper.html
+git commit -m "feat: add localStorage warning and complete launcher helper"
+```
