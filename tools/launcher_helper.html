@@ -335,6 +335,82 @@ function handleAdd() {
   if (typeof renderStatusList === 'function') renderStatusList();
 }
 
+// ── Edit profile ──────────────────────────────────────
+function startEdit(id) {
+  const p = loadProfiles().find(x => x.id === id);
+  if (!p) return;
+
+  document.getElementById(`profile-row-${id}`).outerHTML = `
+    <div class="edit-form" id="profile-row-${id}">
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Name *</label>
+          <input type="text" id="edit-name-${id}" value="${esc(p.name)}">
+        </div>
+        <div class="form-group">
+          <label>Port *</label>
+          <input type="number" id="edit-port-${id}" value="${p.port}" min="1" max="65535">
+        </div>
+        <div class="form-group full">
+          <label>Work Directory *</label>
+          <input type="text" id="edit-workdir-${id}" value="${esc(p.workDir)}">
+        </div>
+        <div class="form-group full">
+          <label>Start Command *</label>
+          <input type="text" id="edit-command-${id}" value="${esc(p.command)}">
+        </div>
+        <div class="form-group full">
+          <label>Browser Path</label>
+          <input type="text" id="edit-browserpath-${id}" value="${esc(p.browserPath || '')}">
+        </div>
+      </div>
+      <div id="edit-error-${id}" class="error"></div>
+      <div class="btn-row" style="margin-top:8px;">
+        <button class="btn btn-primary"   onclick="handleSave('${id}')">Save</button>
+        <button class="btn btn-secondary" onclick="cancelEdit('${id}')">Cancel</button>
+      </div>
+    </div>`;
+}
+
+function handleSave(id) {
+  const data = {
+    name:        document.getElementById(`edit-name-${id}`).value,
+    port:        document.getElementById(`edit-port-${id}`).value,
+    workDir:     document.getElementById(`edit-workdir-${id}`).value,
+    command:     document.getElementById(`edit-command-${id}`).value,
+    browserPath: document.getElementById(`edit-browserpath-${id}`).value.trim(),
+  };
+
+  const errors = validateProfile(data);
+  document.getElementById(`edit-error-${id}`).textContent = errors.join(' ');
+  if (errors.length) return;
+
+  data.port = parseInt(data.port, 10);
+  updateProfile(id, data);
+
+  document.getElementById(`profile-row-${id}`).outerHTML =
+    profileRowHtml(loadProfiles().find(p => p.id === id));
+
+  if (typeof syncGeneratorDropdown === 'function') syncGeneratorDropdown();
+  if (typeof renderStatusList === 'function') renderStatusList();
+}
+
+function cancelEdit(id) {
+  const p = loadProfiles().find(x => x.id === id);
+  if (!p) return;
+  document.getElementById(`profile-row-${id}`).outerHTML = profileRowHtml(p);
+}
+
+// ── Delete profile ────────────────────────────────────
+function handleDelete(id) {
+  const p = loadProfiles().find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(`Delete "${p.name}"?`)) return;
+  deleteProfile(id);
+  renderProfileList();
+  if (typeof renderStatusList === 'function') renderStatusList();
+}
+
 // ── Init ──────────────────────────────────────────────
 renderProfileList();
 </script>
