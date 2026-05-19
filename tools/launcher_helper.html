@@ -494,6 +494,72 @@ function jumpToGenerator(profileId) {
   document.getElementById('section-generator').scrollIntoView({ behavior: 'smooth' });
 }
 
+// ── Batch generation ──────────────────────────────────
+function generateStartBatch(p) {
+  const browserLine = p.browserPath
+    ? `start "" "http://localhost:${p.port}${p.browserPath}"\r\n`
+    : '';
+  return `@echo off\r\n` +
+         `cd /d "${p.workDir}"\r\n` +
+         `echo Starting ${p.name}...\r\n` +
+         browserLine +
+         `${p.command}\r\n` +
+         `pause\r\n`;
+}
+
+function generateStopBatch(p) {
+  return `@echo off\r\n` +
+         `echo Stopping ${p.name} on port ${p.port}...\r\n` +
+         `for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":${p.port} "') do (\r\n` +
+         `    taskkill /F /PID %%a 2>nul\r\n` +
+         `)\r\n` +
+         `echo Done.\r\n` +
+         `pause\r\n`;
+}
+
+function handleGenerate() {
+  const profileId = document.getElementById('gen-profile').value;
+  if (!profileId) { alert('Please select a profile.'); return; }
+  if (!selectedType) { alert('Please select Start or Stop.'); return; }
+
+  const p = loadProfiles().find(x => x.id === profileId);
+  if (!p) return;
+
+  const content = selectedType === 'start'
+    ? generateStartBatch(p)
+    : generateStopBatch(p);
+
+  document.getElementById('gen-content').value = content;
+  document.getElementById('gen-output').style.display = 'block';
+}
+
+function copyBatch() {
+  const text = document.getElementById('gen-content').value;
+  navigator.clipboard.writeText(text).then(() => {
+    alert('Copied to clipboard.');
+  }).catch(() => {
+    const ta = document.getElementById('gen-content');
+    ta.select();
+    document.execCommand('copy');
+    alert('Copied to clipboard.');
+  });
+}
+
+function downloadBatch() {
+  const content = document.getElementById('gen-content').value;
+  const profileId = document.getElementById('gen-profile').value;
+  const p = loadProfiles().find(x => x.id === profileId);
+  const filename = p ? `${selectedType}_${p.name}.bat` : `${selectedType}.bat`;
+
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ── Init ──────────────────────────────────────────────
 renderProfileList();
 syncGeneratorDropdown();
