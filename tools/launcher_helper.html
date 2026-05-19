@@ -276,6 +276,67 @@ function deleteProfile(id) {
   saveProfiles(profiles);
   return profiles;
 }
+
+// ── Rendering ─────────────────────────────────────────
+function renderProfileList() {
+  const profiles = loadProfiles();
+  const el = document.getElementById('profile-list');
+
+  if (profiles.length === 0) {
+    el.innerHTML = '<p class="empty">No profiles yet.</p>';
+    return;
+  }
+
+  el.innerHTML = profiles.map(p => profileRowHtml(p)).join('');
+  syncGeneratorDropdown();
+}
+
+function profileRowHtml(p) {
+  return `<div class="row" id="profile-row-${p.id}">
+    <span class="row-name">${esc(p.name)}</span>
+    <span class="row-port">:${p.port}</span>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="startEdit('${p.id}')">Edit</button>
+      <button class="btn btn-danger"    onclick="handleDelete('${p.id}')">Delete</button>
+    </div>
+  </div>`;
+}
+
+function esc(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ── Add profile ───────────────────────────────────────
+function handleAdd() {
+  const data = {
+    name:        document.getElementById('add-name').value,
+    port:        document.getElementById('add-port').value,
+    workDir:     document.getElementById('add-workdir').value,
+    command:     document.getElementById('add-command').value,
+    browserPath: document.getElementById('add-browserpath').value.trim(),
+  };
+
+  const errors = validateProfile(data);
+  document.getElementById('add-error').textContent = errors.join(' ');
+  if (errors.length) return;
+
+  data.port = parseInt(data.port, 10);
+  addProfile(data);
+
+  ['add-name','add-port','add-workdir','add-command','add-browserpath']
+    .forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('add-error').textContent = '';
+
+  renderProfileList();
+  renderStatusList();
+}
+
+// ── Init ──────────────────────────────────────────────
+renderProfileList();
 </script>
 </body>
 </html>
