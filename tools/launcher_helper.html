@@ -580,6 +580,16 @@ function downloadBatch() {
   }
 })();
 
+if (loadProfiles().length === 0) {
+  addProfile({
+    name:        'DipTriage',
+    port:        8000,
+    workDir:     'C:\\Users\\yuich\\OneDrive\\ドキュメント\\GitHub\\DipTriage',
+    command:     'uv run uvicorn app.main:app --reload',
+    browserPath: '/dashboard',
+  });
+}
+
 renderProfileList();
 renderStatusList();
 refreshStatuses();
