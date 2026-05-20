@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from sqlalchemy import nullslast, select, update
@@ -12,10 +13,12 @@ from app.database import AsyncSessionLocal
 from app.intelligence.interview import run_interview
 from app.intelligence.news_fetcher import fetch_and_save_news
 from app.models import DipEvent, IndexPrice, NewsArticle, NumericalAnalysis, StockMeta, StockPrice
+from app.models.settings import AppSettings
 from app.models.watchlist import WatchlistEntry, WatchlistSnapshot
 from app.pipeline.analyzer import analyze_dip_event
 from app.pipeline.detector import apply_macro_filter, get_price_changes, save_dip_events, screen_dips
 from app.pipeline.fetcher import (
+    StockInfo,
     extract_price_rows,
     fetch_index_price_rows,
     fetch_prices,
@@ -115,11 +118,20 @@ async def snapshot_watching_entries(session, today: str) -> None:
     await session.commit()
 
 
-async def run_daily_pipeline(target_date: str | None = None) -> dict:
+async def run_daily_pipeline(
+    target_date: str | None = None,
+    on_stage: Callable[[str, str, str], None] | None = None,
+    max_stage: int = 4,
+) -> dict:
     """
     第0〜2段階を順番に実行する。
     target_date: "YYYY-MM-DD" 形式。None なら今日。
+    on_stage: ステージ進捗コールバック (stage, current, total)
     """
+    def _notify(stage: str, current: str = "", total: str = "") -> None:
+        if on_stage:
+            on_stage(stage, current, total)
+
     if target_date is None:
         target_date = datetime.now().strftime("%Y-%m-%d")
 
@@ -127,36 +139,72 @@ async def run_daily_pipeline(target_date: str | None = None) -> dict:
     stats = {"date": target_date, "dips_detected": 0, "dips_analyzed": 0}
 
     async with AsyncSessionLocal() as session:
+        # ── DB から取得対象設定を読み込む ──
+        settings_r = await session.execute(select(AppSettings).where(AppSettings.id == 1))
+        app_settings = settings_r.scalar_one_or_none()
+        market_scope = app_settings.market_scope if app_settings else "japan_and_sp500"
+        dip_lookback_days = app_settings.dip_lookback_days if app_settings else 2
+
         # ── 第0段階：銘柄マスター更新 ──
-        logger.info("Stage 0: Fetching symbol universe")
-        sp500 = get_sp500_symbols()
+        _notify("Stage 0: シンボル取得")
+        logger.info("Stage 0: Fetching symbol universe (scope=%s)", market_scope)
         nikkei = get_nikkei225_symbols()
-        all_stocks = sp500 + nikkei
+        if not nikkei and market_scope in ("japan_only", "japan_and_sp500"):
+            # Fallback: use previously cached symbols from DB when web scraping fails
+            cached_r = await session.execute(
+                select(StockMeta).where(StockMeta.index_name == "Nikkei225", StockMeta.is_active == 1)
+            )
+            nikkei = [
+                StockInfo(
+                    symbol=s.symbol,
+                    name=s.name or s.symbol,
+                    market=s.market or "JP",
+                    exchange=s.exchange or "TSE",
+                    sector=s.sector,
+                    sector_etf=None,
+                    index_name="Nikkei225",
+                )
+                for s in cached_r.scalars().all()
+            ]
+            if nikkei:
+                logger.warning("Nikkei225 web scraping failed; using %d cached symbols from DB.", len(nikkei))
+            else:
+                logger.error("No Nikkei225 symbols from web or DB. Pipeline will run with 0 stocks.")
+        if market_scope == "japan_only":
+            all_stocks = nikkei
+        else:
+            sp500 = get_sp500_symbols()
+            all_stocks = sp500 + nikkei
         await _upsert_stock_meta(session, all_stocks)
         logger.info("Universe: %d stocks", len(all_stocks))
 
         # ── 第0段階：指数データ取得 ──
+        _notify("Stage 0: 指数データ取得")
         index_syms = list(INDEX_SYMBOLS.values())
+        if market_scope == "japan_only":
+            index_syms = [INDEX_SYMBOLS["JP"]]
         index_rows = fetch_index_price_rows(index_syms, end_date=target_date)
         await _save_index_prices(session, index_rows)
         index_changes = {r.symbol: r.change_pct for r in index_rows if r.change_pct is not None}
 
         # ── 第0段階：株価データ取得 ──
+        _notify("Stage 0: 株価データ取得", "0", str(len(all_stocks)))
         logger.info("Stage 0: Downloading stock prices (%d symbols)", len(all_stocks))
         all_symbols = [s.symbol for s in all_stocks]
 
-        # セクター ETF も一緒に取得
-        sector_etfs = list({s.sector_etf for s in sp500 if s.sector_etf})
+        # セクター ETF も一緒に取得（S&P500 のみ sector_etf を保持）
+        sector_etfs = list({s.sector_etf for s in all_stocks if s.sector_etf})
         download_symbols = all_symbols + sector_etfs + index_syms
 
-        price_data = fetch_prices(download_symbols, days=2, end_date=target_date)
+        price_data = fetch_prices(download_symbols, days=dip_lookback_days, end_date=target_date)
         price_rows = []
         for sym, df in price_data.items():
-            price_rows.extend(extract_price_rows(sym, df, n_days=2))
+            price_rows.extend(extract_price_rows(sym, df, n_days=dip_lookback_days))
         await _save_prices(session, price_rows)
         logger.info("Saved %d price rows", len(price_rows))
 
         # ── 第1段階：急落検知 ──
+        _notify("Stage 1: 急落検知")
         logger.info("Stage 1: Detecting dips")
         macro_result = apply_macro_filter(index_changes)
         if macro_result.is_macro_shock:
@@ -167,11 +215,16 @@ async def run_daily_pipeline(target_date: str | None = None) -> dict:
         dip_events = await save_dip_events(session, dip_candidates, detected_date=target_date)
         stats["dips_detected"] = len(dip_events)
 
+        if max_stage < 2:
+            return stats
+
         # ── 第2段階：数値分析 ──
+        _notify("Stage 2: 数値分析", "0", str(len(dip_events)))
         logger.info("Stage 2: Analyzing %d dip events", len(dip_events))
         sym_to_meta = {s.symbol: s for s in all_stocks}
 
-        for event in dip_events:
+        for i, event in enumerate(dip_events, 1):
+            _notify("Stage 2: 数値分析", str(i), str(len(dip_events)))
             meta = sym_to_meta.get(event.symbol)
             sector_etf = meta.sector_etf if meta else None
             market_index = INDEX_SYMBOLS.get("JP" if event.symbol.endswith(".T") else "US", "^GSPC")
@@ -181,20 +234,30 @@ async def run_daily_pipeline(target_date: str | None = None) -> dict:
             except Exception as e:
                 logger.error("Analysis failed for %s: %s", event.symbol, e)
 
+        if max_stage < 3:
+            return stats
+
         # ── 第3段階a: ニュース取得 ──
         non_macro_events = [e for e in dip_events if not e.macro_flag]
+        _notify("Stage 3a: ニュース取得", "0", str(len(non_macro_events)))
         logger.info("Stage 3a: Fetching news for %d non-macro dips", len(non_macro_events))
-        for event in non_macro_events:
+        for i, event in enumerate(non_macro_events, 1):
+            _notify("Stage 3a: ニュース取得", str(i), str(len(non_macro_events)))
             try:
                 articles = await fetch_and_save_news(session, event)
                 stats["news_fetched"] = stats.get("news_fetched", 0) + len(articles)
             except Exception as e:
                 logger.warning("News fetch failed for %s: %s", event.symbol, e)
 
+        if max_stage < 4:
+            return stats
+
         # ── 第3段階b: LLM 問診 ──
+        _notify("Stage 3b: LLM インタビュー", "0", str(len(non_macro_events)))
         logger.info("Stage 3b: Running interview for %d dips", len(non_macro_events))
         stats["dips_interviewed"] = 0
-        for event in non_macro_events:
+        for i, event in enumerate(non_macro_events, 1):
+            _notify("Stage 3b: LLM インタビュー", str(i), str(len(non_macro_events)))
             news_result = await session.execute(
                 select(NewsArticle)
                 .where(NewsArticle.dip_event_id == event.id, NewsArticle.is_duplicate == 0)
@@ -225,6 +288,7 @@ async def run_daily_pipeline(target_date: str | None = None) -> dict:
         await session.commit()
 
         # ── 第4段階：ウォッチリスト スナップショット ──
+        _notify("Stage 4: ウォッチリスト更新")
         logger.info("Stage 4: Snapshotting watching entries")
         try:
             await snapshot_watching_entries(session, target_date)
@@ -232,4 +296,66 @@ async def run_daily_pipeline(target_date: str | None = None) -> dict:
             logger.error("Snapshot failed: %s", e)
 
     logger.info("=== Pipeline done: %s ===", stats)
+    return stats
+
+
+async def run_news_refresh(
+    days: int = 5,
+    on_stage: Callable[[str, str, str], None] | None = None,
+) -> dict:
+    """Stage 3a + 3b のみ実行。過去 days 日以内の非マクロ DipEvent を対象とする。"""
+    from datetime import date, timedelta
+
+    def _notify(stage: str, current: str = "", total: str = "") -> None:
+        if on_stage:
+            on_stage(stage, current, total)
+
+    since = (date.today() - timedelta(days=days)).isoformat()
+    stats: dict = {"events": 0, "news_fetched": 0, "interviewed": 0}
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(DipEvent)
+            .where(DipEvent.macro_flag == 0, DipEvent.detected_date >= since)
+            .order_by(DipEvent.detected_date.desc())
+        )
+        events = result.scalars().all()
+        stats["events"] = len(events)
+
+        meta_result = await session.execute(select(StockMeta))
+        sym_to_meta = {m.symbol: m for m in meta_result.scalars().all()}
+
+        logger.info("News refresh: %d events since %s", len(events), since)
+
+        for i, event in enumerate(events, 1):
+            _notify("Stage 3a: ニュース取得", str(i), str(len(events)))
+            try:
+                articles = await fetch_and_save_news(session, event)
+                stats["news_fetched"] += len(articles)
+            except Exception as e:
+                logger.warning("News fetch failed for %s: %s", event.symbol, e)
+
+        for i, event in enumerate(events, 1):
+            _notify("Stage 3b: LLM インタビュー", str(i), str(len(events)))
+            news_r = await session.execute(
+                select(NewsArticle)
+                .where(NewsArticle.dip_event_id == event.id, NewsArticle.is_duplicate == 0)
+                .order_by(nullslast(NewsArticle.before_trigger.desc()), NewsArticle.published_at.desc())
+                .limit(10)
+            )
+            articles = news_r.scalars().all()
+            if not articles:
+                logger.warning("No news for %s, skipping interview", event.symbol)
+                continue
+
+            ana_r = await session.execute(
+                select(NumericalAnalysis).where(NumericalAnalysis.dip_event_id == event.id).limit(1)
+            )
+            analysis = ana_r.scalar_one_or_none()
+            meta = sym_to_meta.get(event.symbol)
+            briefing = await run_interview(session, event, analysis, articles, meta=meta)
+            if briefing:
+                stats["interviewed"] += 1
+
+    logger.info("=== News refresh done: %s ===", stats)
     return stats
