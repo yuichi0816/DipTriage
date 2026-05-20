@@ -75,6 +75,7 @@ async def run_pipeline_now(
     if status.status == "running":
         return templates.TemplateResponse(request, "partials/pipeline_status.html", {"status": status})
 
+    max_stage = max(1, min(4, max_stage))
     resolved_date = target_date.strip() or None
 
     async def _run():

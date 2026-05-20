@@ -124,9 +124,10 @@ async def run_daily_pipeline(
     max_stage: int = 4,
 ) -> dict:
     """
-    第0〜2段階を順番に実行する。
+    第0〜4段階を順番に実行する。max_stage で深度を制御できる。
     target_date: "YYYY-MM-DD" 形式。None なら今日。
     on_stage: ステージ進捗コールバック (stage, current, total)
+    max_stage: 実行する最終ステージ番号 (1=急落検知, 2=数値分析, 3=ニュース取得, 4=AI問診/完全実行)
     """
     def _notify(stage: str, current: str = "", total: str = "") -> None:
         if on_stage:
