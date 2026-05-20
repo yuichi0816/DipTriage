@@ -132,7 +132,7 @@
           <span class="text-xs text-gray-300">④ AI問診</span>
         </label>
       </div>
-      <input type="date" id="pipeline-date"
+      <input type="date" id="pipeline-date" name="target_date"
              class="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-xs text-center
                     focus:outline-none focus:border-blue-500 text-gray-200">
       <input type="hidden" id="pipeline-max-stage" name="max_stage" value="4">
@@ -168,17 +168,6 @@
     </div>
 
   </div>
-
-  <script>
-  (function() {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    document.getElementById('pipeline-date').value = `${yyyy}-${mm}-${dd}`;
-  })();
-  </script>
 
   <!-- 中央カラム: 急落リスト -->
   <div class="flex-1 min-w-0">
@@ -279,6 +268,14 @@
 </div>
 
 <script>
+(function() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  document.getElementById('pipeline-date').value = `${yyyy}-${mm}-${dd}`;
+})();
 function updateLLMVisibility() {
   const isGroq = document.querySelector('[name=llm_provider][value=groq]').checked;
   document.getElementById('groq-settings').classList.toggle('hidden', !isGroq);
