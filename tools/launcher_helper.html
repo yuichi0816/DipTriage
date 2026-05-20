@@ -556,7 +556,7 @@ function downloadBatch() {
   const p = loadProfiles().find(x => x.id === profileId);
   const filename = p ? `${selectedType}_${p.name}.bat` : `${selectedType}.bat`;
 
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const blob = new Blob(['﻿' + content], { type: 'text/plain;charset=utf-8' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href = url;
