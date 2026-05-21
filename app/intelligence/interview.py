@@ -15,8 +15,28 @@ from app.models import Briefing, DipEvent, NewsArticle, NumericalAnalysis
 
 logger = logging.getLogger(__name__)
 
-_VALID_CLASSES = {"accident", "incident", "unknown"}
-_CLASS_JP = {"accident": "事故型", "incident": "事件型", "unknown": "不明"}
+_VALID_CLASSES = {"accident", "incident", "structural", "macro", "unknown"}
+_CLASS_JP = {
+    "accident": "事故型",
+    "incident": "事件型",
+    "structural": "構造型",
+    "macro": "マクロ型",
+    "unknown": "不明",
+}
+
+
+def _derive_class(
+    intentional: bool | None,
+    recoverable: bool | None,
+    company_specific: bool | None,
+) -> str:
+    if intentional is True:       return "incident"
+    if intentional is None:       return "unknown"
+    if recoverable is True:       return "accident"
+    if recoverable is None:       return "unknown"
+    if company_specific is True:  return "structural"
+    if company_specific is None:  return "unknown"
+    return "macro"
 
 
 def build_prompt(
@@ -71,8 +91,24 @@ def build_prompt(
         "【関連ニュース（急落前後）】",
         news_section,
         "",
+        "【分類定義】",
+        "- accident（事故型）: 一時的・外的・偶発的な要因。企業の根本的なビジネス価値は毀損していない。",
+        "  例: システム障害、天候・自然災害、一時的な決算ミス・ガイダンス下方修正、製品リコール、経営者の一時的失言",
+        "- incident（事件型）: 企業の本質的・構造的問題。長期的な企業価値毀損が疑われる。",
+        "  例: 不正会計・詐欺発覚、継続的な競争力低下、ガバナンス問題、規制当局の重大制裁",
+        "- unknown: ニュース不足・両方の特徴が混在・判断困難",
+        "",
+        "【判断の鍵】",
+        "「急落の原因は、将来に渡って企業の根本的競争力・信頼性を毀損するか？」",
+        "→ NO（一時的・外的）= accident  /  YES（構造的・永続的）= incident",
+        "",
+        "【分類例】",
+        "- accident: ITシステム障害によるサービス停止。翌日には復旧見込みとの報道 → accident",
+        "- incident: 不正会計が発覚し、複数役員が捜査対象との報道 → incident",
+        "",
         "必ず日本語で、以下のJSON形式のみで回答してください（他のテキスト不要）:",
         '{',
+        '  "key_facts": "急落の直接原因を1文（判断根拠）",',
         '  "situation_summary": "日本語で2〜3文で何が起きたかを説明",',
         '  "initial_class": "accident または incident または unknown"',
         '}',
@@ -91,8 +127,11 @@ def parse_llm_response(text: str) -> dict[str, str]:
         cls = data.get("initial_class", "unknown")
         if cls not in _VALID_CLASSES:
             cls = "unknown"
+        key_facts = data.get("key_facts", "")
+        summary = data.get("situation_summary", "（解析失敗）")
+        combined = f"[根拠] {key_facts}\n{summary}" if key_facts else summary
         return {
-            "situation_summary": data.get("situation_summary", "（解析失敗）"),
+            "situation_summary": combined,
             "initial_class": cls,
         }
     except json.JSONDecodeError:

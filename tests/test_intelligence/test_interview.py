@@ -2,7 +2,8 @@ import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.intelligence.interview import build_prompt, parse_llm_response
+import json
+from app.intelligence.interview import build_prompt, parse_llm_response, _derive_class
 
 
 def _event(symbol="CRWD", trigger_date="2024-07-19", change_1d=-11.2, change_5d=-8.7):
@@ -63,6 +64,46 @@ class TestBuildPrompt:
         prompt = build_prompt(_event(), _analysis(volume_ratio=4.2), [])
         assert "4.2" in prompt
 
+    def test_contains_classification_definition(self):
+        prompt = build_prompt(_event(), None, [])
+        assert "accident（事故型）" in prompt
+        assert "incident（事件型）" in prompt
+        assert "判断の鍵" in prompt
+
+    def test_contains_key_facts_field(self):
+        prompt = build_prompt(_event(), None, [])
+        assert "key_facts" in prompt
+
+    def test_contains_few_shot_examples(self):
+        prompt = build_prompt(_event(), None, [])
+        assert "分類例" in prompt
+
+
+class TestDeriveClass:
+    def test_intentional_true_returns_incident(self):
+        assert _derive_class(True, None, None) == "incident"
+
+    def test_intentional_none_returns_unknown(self):
+        assert _derive_class(None, None, None) == "unknown"
+
+    def test_recoverable_true_returns_accident(self):
+        assert _derive_class(False, True, None) == "accident"
+
+    def test_recoverable_none_returns_unknown(self):
+        assert _derive_class(False, None, None) == "unknown"
+
+    def test_company_specific_true_returns_structural(self):
+        assert _derive_class(False, False, True) == "structural"
+
+    def test_company_specific_false_returns_macro(self):
+        assert _derive_class(False, False, False) == "macro"
+
+    def test_company_specific_none_returns_unknown(self):
+        assert _derive_class(False, False, None) == "unknown"
+
+    def test_intentional_true_ignores_other_axes(self):
+        assert _derive_class(True, True, False) == "incident"
+
 
 class TestParseLlmResponse:
     def test_parses_valid_json(self):
@@ -91,6 +132,17 @@ class TestParseLlmResponse:
     def test_accepts_incident_class(self):
         text = '{"situation_summary": "粉飾決算。", "initial_class": "incident"}'
         assert parse_llm_response(text)["initial_class"] == "incident"
+
+    def test_combines_key_facts_into_situation_summary(self):
+        text = '{"key_facts": "システム障害が発生した。", "situation_summary": "詳細説明。", "initial_class": "accident"}'
+        result = parse_llm_response(text)
+        assert result["situation_summary"] == "[根拠] システム障害が発生した。\n詳細説明。"
+        assert result["initial_class"] == "accident"
+
+    def test_situation_summary_unchanged_without_key_facts(self):
+        text = '{"situation_summary": "詳細説明のみ。", "initial_class": "incident"}'
+        result = parse_llm_response(text)
+        assert result["situation_summary"] == "詳細説明のみ。"
 
 
 # ── 統合テスト ──────────────────────────────────────────────────────
