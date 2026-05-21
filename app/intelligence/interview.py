@@ -124,21 +124,36 @@ def build_prompt(
 
 
 def parse_llm_response(text: str) -> dict[str, str]:
-    """LLM の応答から JSON を抽出してパースする。失敗時はフォールバック値を返す。"""
+    """LLM の応答から JSON を抽出し、3軸から分類を導出する。失敗時はフォールバック値を返す。"""
     _fallback = {"situation_summary": "（解析失敗）", "initial_class": "unknown"}
     match = re.search(r'\{[^{}]+\}', text, re.DOTALL)
     if not match:
         return _fallback
     try:
         data = json.loads(match.group())
-        cls = data.get("initial_class", "unknown")
-        if cls not in _VALID_CLASSES:
-            cls = "unknown"
+        intentional = data.get("intentional")
+        recoverable = data.get("recoverable")
+        company_specific = data.get("company_specific")
+        cls = _derive_class(intentional, recoverable, company_specific)
+
+        def _fmt(v) -> str:
+            if v is True:  return "YES"
+            if v is False: return "NO"
+            return "?"
+
         key_facts = data.get("key_facts", "")
         summary = data.get("situation_summary", "（解析失敗）")
-        combined = f"[根拠] {key_facts}\n{summary}" if key_facts else summary
+        axis_line = (
+            f"[判断] 意図的={_fmt(intentional)} / 回復可={_fmt(recoverable)}"
+            f" / 自社={_fmt(company_specific)} → {_CLASS_JP.get(cls, '不明')}"
+        )
+        parts = []
+        if key_facts:
+            parts.append(f"[根拠] {key_facts}")
+        parts.append(axis_line)
+        parts.append(summary)
         return {
-            "situation_summary": combined,
+            "situation_summary": "\n".join(parts),
             "initial_class": cls,
         }
     except json.JSONDecodeError:

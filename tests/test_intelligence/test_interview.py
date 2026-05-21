@@ -109,43 +109,80 @@ class TestDeriveClass:
 
 
 class TestParseLlmResponse:
-    def test_parses_valid_json(self):
-        text = '{"situation_summary": "障害発生。", "initial_class": "accident"}'
-        result = parse_llm_response(text)
-        assert result["situation_summary"] == "障害発生。"
+    def _json(self, intentional, recoverable, company_specific,
+              summary="説明。", key_facts="原因。"):
+        return json.dumps({
+            "key_facts": key_facts,
+            "intentional": intentional,
+            "recoverable": recoverable,
+            "company_specific": company_specific,
+            "situation_summary": summary,
+        })
+
+    def test_derives_accident(self):
+        result = parse_llm_response(
+            self._json(False, True, None, "障害発生。", "システム障害。")
+        )
         assert result["initial_class"] == "accident"
 
-    def test_parses_json_embedded_in_surrounding_text(self):
-        text = 'preamble\n{"situation_summary": "ok", "initial_class": "incident"}\nsuffix'
-        assert parse_llm_response(text)["initial_class"] == "incident"
+    def test_derives_incident(self):
+        result = parse_llm_response(
+            self._json(True, None, None, "不正発覚。", "不正会計。")
+        )
+        assert result["initial_class"] == "incident"
+
+    def test_derives_structural(self):
+        result = parse_llm_response(
+            self._json(False, False, True, "業績悪化。", "競争力低下。")
+        )
+        assert result["initial_class"] == "structural"
+
+    def test_derives_macro(self):
+        result = parse_llm_response(
+            self._json(False, False, False, "マクロ要因。", "金利上昇。")
+        )
+        assert result["initial_class"] == "macro"
+
+    def test_derives_unknown_when_intentional_null(self):
+        result = parse_llm_response(
+            self._json(None, None, None)
+        )
+        assert result["initial_class"] == "unknown"
+
+    def test_derives_unknown_when_recoverable_null(self):
+        result = parse_llm_response(
+            self._json(False, None, None)
+        )
+        assert result["initial_class"] == "unknown"
+
+    def test_axis_judgment_recorded_in_summary(self):
+        result = parse_llm_response(
+            self._json(False, True, None, "詳細。", "原因。")
+        )
+        assert "[根拠] 原因。" in result["situation_summary"]
+        assert "[判断]" in result["situation_summary"]
+        assert "事故型" in result["situation_summary"]
+        assert "詳細。" in result["situation_summary"]
 
     def test_returns_fallback_for_invalid_json(self):
         result = parse_llm_response("not json at all")
         assert result["initial_class"] == "unknown"
         assert "解析失敗" in result["situation_summary"]
 
-    def test_normalizes_unknown_class_value(self):
-        text = '{"situation_summary": "unclear", "initial_class": "maybe"}'
-        assert parse_llm_response(text)["initial_class"] == "unknown"
-
     def test_handles_empty_string(self):
         result = parse_llm_response("")
         assert result["initial_class"] == "unknown"
 
-    def test_accepts_incident_class(self):
-        text = '{"situation_summary": "粉飾決算。", "initial_class": "incident"}'
-        assert parse_llm_response(text)["initial_class"] == "incident"
+    def test_parses_json_embedded_in_surrounding_text(self):
+        inner = self._json(False, True, None, "ok", "原因")
+        text = f"preamble\n{inner}\nsuffix"
+        assert parse_llm_response(text)["initial_class"] == "accident"
 
-    def test_combines_key_facts_into_situation_summary(self):
-        text = '{"key_facts": "システム障害が発生した。", "situation_summary": "詳細説明。", "initial_class": "accident"}'
-        result = parse_llm_response(text)
-        assert result["situation_summary"] == "[根拠] システム障害が発生した。\n詳細説明。"
-        assert result["initial_class"] == "accident"
-
-    def test_situation_summary_unchanged_without_key_facts(self):
-        text = '{"situation_summary": "詳細説明のみ。", "initial_class": "incident"}'
-        result = parse_llm_response(text)
-        assert result["situation_summary"] == "詳細説明のみ。"
+    def test_intentional_true_ignores_other_axes(self):
+        result = parse_llm_response(
+            self._json(True, True, False)
+        )
+        assert result["initial_class"] == "incident"
 
 
 # ── 統合テスト ──────────────────────────────────────────────────────
@@ -184,14 +221,21 @@ async def test_run_interview_saves_briefing_on_success():
         session.add(article)
         await session.commit()
 
-        llm_json = '{"situation_summary": "ソフトウェア障害。", "initial_class": "accident"}'
+        llm_json = json.dumps({
+            "key_facts": "センサー更新によるシステム障害。",
+            "intentional": False,
+            "recoverable": True,
+            "company_specific": None,
+            "situation_summary": "ソフトウェア障害。",
+        })
         with patch("app.intelligence.interview.generate", new=AsyncMock(return_value=(llm_json, 1.5))):
             briefing = await run_interview(session, event, None, [article])
 
     assert briefing is not None
-    assert briefing.situation_summary == "ソフトウェア障害。"
     assert briefing.initial_class == "accident"
     assert briefing.initial_class_jp == "事故型"
+    assert "ソフトウェア障害" in briefing.situation_summary
+    assert "[判断]" in briefing.situation_summary
     assert briefing.briefing_type == "interview"
     assert briefing.generation_sec == pytest.approx(1.5)
 
