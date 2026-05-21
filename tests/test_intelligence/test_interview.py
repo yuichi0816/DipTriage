@@ -57,8 +57,8 @@ class TestBuildPrompt:
 
     def test_contains_json_instruction(self):
         prompt = build_prompt(_event(), None, [])
-        assert "initial_class" in prompt
         assert "situation_summary" in prompt
+        assert "intentional" in prompt
 
     def test_volume_ratio_included_when_analysis_provided(self):
         prompt = build_prompt(_event(), _analysis(volume_ratio=4.2), [])
@@ -66,17 +66,20 @@ class TestBuildPrompt:
 
     def test_contains_classification_definition(self):
         prompt = build_prompt(_event(), None, [])
-        assert "accident（事故型）" in prompt
-        assert "incident（事件型）" in prompt
-        assert "判断の鍵" in prompt
+        assert "Q1" in prompt
+        assert "Q2" in prompt
+        assert "Q3" in prompt
+        assert "intentional" in prompt
+        assert "recoverable" in prompt
+        assert "company_specific" in prompt
 
     def test_contains_key_facts_field(self):
         prompt = build_prompt(_event(), None, [])
         assert "key_facts" in prompt
 
-    def test_contains_few_shot_examples(self):
+    def test_contains_2axis_flow_header(self):
         prompt = build_prompt(_event(), None, [])
-        assert "分類例" in prompt
+        assert "2軸分類フロー" in prompt
 
 
 class TestDeriveClass:
