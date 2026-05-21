@@ -75,6 +75,21 @@ def build_diagnosis_prompt(
         "## 問診結果\n"
         f"- 分類: {interview.initial_class_jp or '不明'}\n"
         f"- サマリー: {interview.situation_summary or '（なし）'}\n\n"
+        "## 分類判断基準（厳守・2軸決定木）\n"
+        "以下の3つの質問に順番に答えて initial_class を決定してください:\n\n"
+        "Q1. この急落は、会社・経営者による意図的な悪質行為が原因ですか？\n"
+        "    （不正・詐欺・組織ぐるみの情報隠蔽・意図的なガバナンス悪用）\n"
+        "    → YES: incident（事件型）\n"
+        "    → NO : Q2へ\n\n"
+        "Q2. 急落の原因は一時的・回復可能ですか？\n"
+        "    （偶発的なミス・外部イベント・評価調整・自然災害・一時的な決算ミス）\n"
+        "    → YES: accident（事故型）\n"
+        "    → NO : Q3へ\n\n"
+        "Q3. 回復が困難な原因は自社の問題ですか？\n"
+        "    （競争力低下・ビジネスモデル劣化・市場シェア喪失）\n"
+        "    → YES: structural（構造型）\n"
+        "    → NO : macro（マクロ型・金利/地政学/市場全体連動）\n\n"
+        "判断不能な場合は unknown。\n\n"
         f"## 関連ニュース\n{news_lines}\n"
         "## 出力フォーマット例\n\n"
         "━━ 診断ブリーフィング ━━\n"
@@ -97,7 +112,7 @@ def build_diagnosis_prompt(
         "## 出力（JSONのみ、他のテキスト不要）\n\n"
         "```json\n"
         "{\n"
-        '  "initial_class": "accident か incident か unknown",\n'
+        '  "initial_class": "accident / incident / structural / macro / unknown — 上記2軸決定木に厳密に従うこと",\n'
         '  "accident_subtype": "システム障害/一時的決算ミス/製品リコール・品質問題/経営発言・炎上/自然災害・外的要因 のいずれか、またはnull",\n'
         '  "moat_switching_cost": "高/中/低",\n'
         '  "moat_network_effect": "有/無",\n'

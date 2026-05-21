@@ -129,6 +129,16 @@ def test_build_diagnosis_prompt_requests_json_output():
     assert "full_text" in prompt
 
 
+def test_build_diagnosis_prompt_includes_classification_definition():
+    prompt = build_diagnosis_prompt(_make_event(), None, _make_interview(), [])
+    assert "Q1" in prompt
+    assert "Q2" in prompt
+    assert "Q3" in prompt
+    assert "意図的な悪質行為" in prompt
+    assert "structural" in prompt
+    assert "macro" in prompt
+
+
 def _make_valid_json() -> str:
     return json.dumps({
         "initial_class": "accident",
