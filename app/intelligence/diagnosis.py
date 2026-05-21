@@ -9,7 +9,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import OLLAMA_MODEL_DIAGNOSIS
-from app.intelligence.ollama_client import generate
+from app.intelligence.llm_client import generate
 from app.models.analysis import NumericalAnalysis
 from app.models.briefing import Briefing
 from app.models.dip import DipEvent

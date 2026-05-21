@@ -88,9 +88,9 @@ async def diagnose_dip(
             Briefing.dip_event_id == dip_id,
             Briefing.briefing_type == "interview",
             Briefing.is_latest == 1,
-        )
+        ).limit(1)
     )
-    interview = iw_r.scalar_one_or_none()
+    interview = iw_r.scalars().first()
     if not interview:
         return templates.TemplateResponse(
             request, "partials/diagnosis_result.html",

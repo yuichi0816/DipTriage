@@ -24,6 +24,7 @@ from app.pipeline.fetcher import (
     fetch_prices,
     get_nikkei225_symbols,
     get_sp500_symbols,
+    get_tse_segment_symbols,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ async def _upsert_stock_meta(session, stock_infos) -> None:
         stmt = sqlite_insert(StockMeta).values(
             symbol=info.symbol,
             name=info.name,
+            name_ja=info.name_ja,
             market=info.market,
             exchange=info.exchange,
             sector=info.sector,
@@ -45,7 +47,7 @@ async def _upsert_stock_meta(session, stock_infos) -> None:
             updated_at=now,
         ).on_conflict_do_update(
             index_elements=["symbol"],
-            set_={"name": info.name, "sector": info.sector, "updated_at": now},
+            set_={"name": info.name, "name_ja": info.name_ja, "sector": info.sector, "updated_at": now},
         )
         await session.execute(stmt)
     await session.commit()
@@ -143,47 +145,105 @@ async def run_daily_pipeline(
         # ── DB から取得対象設定を読み込む ──
         settings_r = await session.execute(select(AppSettings).where(AppSettings.id == 1))
         app_settings = settings_r.scalar_one_or_none()
-        market_scope = app_settings.market_scope if app_settings else "japan_and_sp500"
+        include_nikkei225 = bool(getattr(app_settings, "include_nikkei225", 1) if app_settings else 1)
+        include_standard  = bool(getattr(app_settings, "include_standard",  0) if app_settings else 0)
+        include_growth    = bool(getattr(app_settings, "include_growth",    0) if app_settings else 0)
+        include_sp500     = bool(getattr(app_settings, "include_sp500",     1) if app_settings else 1)
         dip_lookback_days = app_settings.dip_lookback_days if app_settings else 2
 
         # ── 第0段階：銘柄マスター更新 ──
         _notify("Stage 0: シンボル取得")
-        logger.info("Stage 0: Fetching symbol universe (scope=%s)", market_scope)
-        nikkei = get_nikkei225_symbols()
-        if not nikkei and market_scope in ("japan_only", "japan_and_sp500"):
-            # Fallback: use previously cached symbols from DB when web scraping fails
-            cached_r = await session.execute(
-                select(StockMeta).where(StockMeta.index_name == "Nikkei225", StockMeta.is_active == 1)
-            )
-            nikkei = [
-                StockInfo(
-                    symbol=s.symbol,
-                    name=s.name or s.symbol,
-                    market=s.market or "JP",
-                    exchange=s.exchange or "TSE",
-                    sector=s.sector,
-                    sector_etf=None,
-                    index_name="Nikkei225",
+        logger.info(
+            "Stage 0: Fetching symbol universe (nikkei225=%s, standard=%s, growth=%s, sp500=%s)",
+            include_nikkei225, include_standard, include_growth, include_sp500,
+        )
+        all_stocks: list[StockInfo] = []
+
+        if include_nikkei225:
+            nikkei = get_nikkei225_symbols()
+            if not nikkei:
+                cached_r = await session.execute(
+                    select(StockMeta).where(StockMeta.index_name == "Nikkei225", StockMeta.is_active == 1)
                 )
-                for s in cached_r.scalars().all()
-            ]
-            if nikkei:
-                logger.warning("Nikkei225 web scraping failed; using %d cached symbols from DB.", len(nikkei))
-            else:
-                logger.error("No Nikkei225 symbols from web or DB. Pipeline will run with 0 stocks.")
-        if market_scope == "japan_only":
-            all_stocks = nikkei
-        else:
-            sp500 = get_sp500_symbols()
-            all_stocks = sp500 + nikkei
+                nikkei = [
+                    StockInfo(
+                        symbol=s.symbol,
+                        name=s.name or s.symbol,
+                        market=s.market or "JP",
+                        exchange=s.exchange or "TSE",
+                        sector=s.sector,
+                        sector_etf=None,
+                        index_name="Nikkei225",
+                    )
+                    for s in cached_r.scalars().all()
+                ]
+                if nikkei:
+                    logger.warning("Nikkei225 web scraping failed; using %d cached symbols from DB.", len(nikkei))
+                else:
+                    logger.error("No Nikkei225 symbols from web or DB.")
+            all_stocks.extend(nikkei)
+
+        if include_standard:
+            standard = get_tse_segment_symbols("スタンダード（内国株式）", "TSE Standard")
+            if not standard:
+                cached_r = await session.execute(
+                    select(StockMeta).where(StockMeta.index_name == "TSE Standard", StockMeta.is_active == 1)
+                )
+                standard = [
+                    StockInfo(
+                        symbol=s.symbol,
+                        name=s.name or s.symbol,
+                        market=s.market or "JP",
+                        exchange=s.exchange or "TSE",
+                        sector=s.sector,
+                        sector_etf=None,
+                        index_name="TSE Standard",
+                    )
+                    for s in cached_r.scalars().all()
+                ]
+                if standard:
+                    logger.warning("TSE Standard JPX fetch failed; using %d cached symbols from DB.", len(standard))
+                else:
+                    logger.error("No TSE Standard symbols from JPX or DB.")
+            all_stocks.extend(standard)
+
+        if include_growth:
+            growth = get_tse_segment_symbols("グロース（内国株式）", "TSE Growth")
+            if not growth:
+                cached_r = await session.execute(
+                    select(StockMeta).where(StockMeta.index_name == "TSE Growth", StockMeta.is_active == 1)
+                )
+                growth = [
+                    StockInfo(
+                        symbol=s.symbol,
+                        name=s.name or s.symbol,
+                        market=s.market or "JP",
+                        exchange=s.exchange or "TSE",
+                        sector=s.sector,
+                        sector_etf=None,
+                        index_name="TSE Growth",
+                    )
+                    for s in cached_r.scalars().all()
+                ]
+                if growth:
+                    logger.warning("TSE Growth JPX fetch failed; using %d cached symbols from DB.", len(growth))
+                else:
+                    logger.error("No TSE Growth symbols from JPX or DB.")
+            all_stocks.extend(growth)
+
+        if include_sp500:
+            all_stocks.extend(get_sp500_symbols())
+
         await _upsert_stock_meta(session, all_stocks)
         logger.info("Universe: %d stocks", len(all_stocks))
 
         # ── 第0段階：指数データ取得 ──
         _notify("Stage 0: 指数データ取得")
-        index_syms = list(INDEX_SYMBOLS.values())
-        if market_scope == "japan_only":
-            index_syms = [INDEX_SYMBOLS["JP"]]
+        has_jp = include_nikkei225 or include_standard or include_growth
+        index_syms = (
+            ([INDEX_SYMBOLS["JP"]] if has_jp else []) +
+            ([INDEX_SYMBOLS["US"]] if include_sp500 else [])
+        ) or list(INDEX_SYMBOLS.values())
         index_rows = fetch_index_price_rows(index_syms, end_date=target_date)
         await _save_index_prices(session, index_rows)
         index_changes = {r.symbol: r.change_pct for r in index_rows if r.change_pct is not None}

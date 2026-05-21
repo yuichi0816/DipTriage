@@ -500,25 +500,63 @@ function cmdEsc(str) {
   return String(str).replace(/[\^&|<>]/g, '^$&');
 }
 
+function toBase64Utf16LE(str) {
+  const bytes = new Uint8Array(str.length * 2);
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    bytes[i * 2]     = code & 0xFF;
+    bytes[i * 2 + 1] = (code >> 8) & 0xFF;
+  }
+  let binary = '';
+  bytes.forEach(b => binary += String.fromCharCode(b));
+  return btoa(binary);
+}
+
 function generateStartBatch(p) {
+  // Launch server in a new persistent window so this batch can continue immediately.
+  const psServerCmd = `Set-Location -LiteralPath '${p.workDir.replace(/'/g, "''")}'; ${p.command}`;
+  const encodedServer = toBase64Utf16LE(psServerCmd);
+
+  // Poll until port accepts connections (max 30 s), then open browser.
+  const pollCmd = `$max=30; $i=0; while($i -lt $max){ if(Test-NetConnection localhost -Port ${p.port} -InformationLevel Quiet -WarningAction SilentlyContinue){ break }; Start-Sleep -Seconds 1; $i++ }; if($i -eq $max){ Write-Host 'Timeout: server did not start.' } else { Write-Host 'Server ready.' }`;
+  const encodedPoll = toBase64Utf16LE(pollCmd);
+
   const browserLine = p.browserPath
     ? `start "" "http://localhost:${p.port}${p.browserPath}"\r\n`
     : '';
+
   return `@echo off\r\n` +
-         `cd /d "${p.workDir}"\r\n` +
          `echo Starting ${cmdEsc(p.name)}...\r\n` +
+         `start "${cmdEsc(p.name)} Server" cmd /k "powershell -NoProfile -EncodedCommand ${encodedServer}"\r\n` +
+         `echo Waiting for server on port ${p.port}...\r\n` +
+         `powershell -NoProfile -EncodedCommand ${encodedPoll}\r\n` +
          browserLine +
-         `${p.command}\r\n` +
+         `echo Done. You may close this window.\r\n` +
          `pause\r\n`;
 }
 
 function generateStopBatch(p) {
+  // uvicorn --reload: reloader binds the socket, worker inherits it.
+  // When reloader dies first, Get-NetTCPConnection still shows the dead reloader PID.
+  // Fix: also search WMI children of that PID to find the orphaned worker.
+  const psCmd = [
+    `$port = ${p.port}`,
+    `$all  = Get-WmiObject Win32_Process -ErrorAction SilentlyContinue`,
+    `$kill = [System.Collections.Generic.HashSet[int]]::new()`,
+    `$lpids = @((Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue).OwningProcess | Sort-Object -Unique)`,
+    `if (-not $lpids) { Write-Host 'Not running on port ${p.port}.'; exit 0 }`,
+    // listener PIDs + their WMI children (orphaned workers that inherited the socket)
+    `foreach ($lp in $lpids) { [void]$kill.Add($lp); $all | Where-Object { $_.ParentProcessId -eq $lp } | ForEach-Object { [void]$kill.Add($_.ProcessId) } }`,
+    // any python/uv process with uvicorn in cmdline + its children
+    `$all | Where-Object { $_.Name -match 'python|uv' -and $_.CommandLine -match 'uvicorn' } | ForEach-Object { $uvpid = $_.ProcessId; [void]$kill.Add($uvpid); $all | Where-Object { $_.ParentProcessId -eq $uvpid } | ForEach-Object { [void]$kill.Add($_.ProcessId) } }`,
+    `foreach ($k in $kill) { Stop-Process -Id $k -Force -ErrorAction SilentlyContinue }`,
+    `Start-Sleep -Milliseconds 500`,
+    `if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { Write-Host 'Warning: port still in use.' } else { Write-Host 'Stopped.' }`
+  ].join('; ');
+  const encoded = toBase64Utf16LE(psCmd);
   return `@echo off\r\n` +
          `echo Stopping ${cmdEsc(p.name)} on port ${p.port}...\r\n` +
-         `for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":${p.port} "') do (\r\n` +
-         `    taskkill /F /PID %%a 2>nul\r\n` +
-         `)\r\n` +
-         `echo Done.\r\n` +
+         `powershell -NoProfile -EncodedCommand ${encoded}\r\n` +
          `pause\r\n`;
 }
 
@@ -556,7 +594,7 @@ function downloadBatch() {
   const p = loadProfiles().find(x => x.id === profileId);
   const filename = p ? `${selectedType}_${p.name}.bat` : `${selectedType}.bat`;
 
-  const blob = new Blob(['﻿' + content], { type: 'text/plain;charset=utf-8' });
+  const blob = new Blob([content], { type: 'text/plain;charset=us-ascii' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href = url;
@@ -586,7 +624,7 @@ if (loadProfiles().length === 0) {
     port:        8000,
     workDir:     'C:\\Users\\yuich\\OneDrive\\ドキュメント\\GitHub\\DipTriage',
     command:     'uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude ".claude" --reload-exclude "*.log" --reload-exclude "data"',
-    browserPath: '/dashboard',
+    browserPath: '/',
   });
 }
 

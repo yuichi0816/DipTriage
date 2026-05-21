@@ -17,6 +17,7 @@ class StockMeta(Base):
     sector: Mapped[str | None] = mapped_column(String)
     sector_etf: Mapped[str | None] = mapped_column(String)
     index_name: Mapped[str | None] = mapped_column(String)
+    name_ja: Mapped[str | None] = mapped_column(String)
     is_active: Mapped[int] = mapped_column(Integer, default=1)
     meta_json: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[str] = mapped_column(String, nullable=False)

@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}設定 — DipTriage{% endblock %}
+
+{% block content %}
+<h1 class="text-xl font-bold mb-6">設定</h1>
+
+<div class="flex flex-col gap-6 md:flex-row">
+
+  <!-- 左カラム: 設定フォーム -->
+  <div class="flex-1 min-w-0">
+    <form method="post" action="/settings" class="space-y-6">
+
+      <!-- 自動取得 -->
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide">自動取得</h2>
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" name="auto_fetch_enabled" value="on" class="sr-only peer"
+              {% if settings.auto_fetch_enabled %}checked{% endif %}>
+            <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer
+                        peer-checked:after:translate-x-full peer-checked:after:border-white
+                        after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                        after:bg-white after:border-gray-300 after:border after:rounded-full
+                        after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+          </label>
+          <span class="text-sm text-gray-400">毎日</span>
+          <input type="number" name="pipeline_hour" min="0" max="23" value="{{ settings.pipeline_hour }}"
+                 class="w-14 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-center
+                        focus:outline-none focus:border-blue-500">
+          <span class="text-sm text-gray-400">時</span>
+          <input type="number" name="pipeline_minute" min="0" max="59" value="{{ settings.pipeline_minute }}"
+                 class="w-14 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-center
+                        focus:outline-none focus:border-blue-500">
+          <span class="text-sm text-gray-400">分 (JST)</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 pt-1">
+          <span class="text-sm text-gray-400">ニュース更新対象:</span>
+          <input type="number" name="news_refresh_days" min="1" max="30" value="{{ settings.news_refresh_days }}"
+                 class="w-14 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-center
+                        focus:outline-none focus:border-blue-500">
+          <span class="text-sm text-gray-400">日以内</span>
+        </div>
+      </div>
+
+      <!-- 取得対象 -->
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide">取得対象</h2>
+        <div class="space-y-2">
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" name="include_nikkei225" value="on"
+                   {% if settings.include_nikkei225 %}checked{% endif %}
+                   class="accent-blue-500 w-4 h-4">
+            <div>
+              <span class="text-sm text-gray-300">日本株 - プライム（Nikkei 225）</span>
+              <span class="text-xs text-gray-500 ml-2">225銘柄</span>
+            </div>
+          </label>
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" name="include_standard" value="on"
+                   {% if settings.include_standard %}checked{% endif %}
+                   class="accent-blue-500 w-4 h-4">
+            <div>
+              <span class="text-sm text-gray-300">日本株 - スタンダード市場</span>
+              <span class="text-xs text-gray-500 ml-2">約1,400銘柄・取得時間増</span>
+            </div>
+          </label>
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" name="include_growth" value="on"
+                   {% if settings.include_growth %}checked{% endif %}
+                   class="accent-blue-500 w-4 h-4">
+            <div>
+              <span class="text-sm text-gray-300">日本株 - グロース市場</span>
+              <span class="text-xs text-gray-500 ml-2">約500銘柄・取得時間増</span>
+            </div>
+          </label>
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" name="include_sp500" value="on"
+                   {% if settings.include_sp500 %}checked{% endif %}
+                   class="accent-blue-500 w-4 h-4">
+            <div>
+              <span class="text-sm text-gray-300">米国株 - S&amp;P 500</span>
+              <span class="text-xs text-gray-500 ml-2">約500銘柄</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- LLM プロバイダー -->
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide">LLM プロバイダー</h2>
+        <div class="space-y-2">
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="radio" name="llm_provider" value="ollama"
+                   {% if settings.llm_provider != 'groq' %}checked{% endif %}
+                   class="accent-blue-500" onchange="updateLLMVisibility()">
+            <span class="text-sm text-gray-300">Ollama（ローカル）</span>
+          </label>
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="radio" name="llm_provider" value="groq"
+                   {% if settings.llm_provider == 'groq' %}checked{% endif %}
+                   class="accent-blue-500" onchange="updateLLMVisibility()">
+            <span class="text-sm text-gray-300">Groq（クラウド・無料）</span>
+          </label>
+        </div>
+
+        <div id="groq-settings" class="space-y-3 {% if settings.llm_provider != 'groq' %}hidden{% endif %}">
+          <div>
+            <label class="text-xs text-gray-400">API キー</label>
+            <input type="password" name="groq_api_key" placeholder="gsk_..."
+                   class="w-full mt-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm
+                          focus:outline-none focus:border-blue-500 font-mono">
+            <p class="text-xs text-gray-500 mt-1">空欄のままにすると既存のキーを維持します</p>
+          </div>
+          <div>
+            <label class="text-xs text-gray-400">問診モデル（速度優先）</label>
+            <select name="groq_model_interview"
+                    class="w-full mt-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm
+                           focus:outline-none focus:border-blue-500">
+              {% for m in ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'gemma2-9b-it'] %}
+              <option value="{{ m }}" {% if settings.groq_model_interview == m %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-gray-400">診断モデル（精度優先）</label>
+            <select name="groq_model_diagnosis"
+                    class="w-full mt-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm
+                           focus:outline-none focus:border-blue-500">
+              {% for m in ['llama-3.3-70b-versatile', 'qwen-qwq-32b', 'deepseek-r1-distill-llama-70b'] %}
+              <option value="{{ m }}" {% if settings.groq_model_diagnosis == m %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit"
+              class="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg transition-colors">
+        保存
+      </button>
+    </form>
+
+    <!-- 手動実行 -->
+    <div class="mt-6 bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide">手動実行</h2>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-gray-400 shrink-0">対象日</span>
+        <input type="date" id="pipeline-date" name="target_date"
+               class="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200
+                      focus:outline-none focus:border-blue-500">
+      </div>
+      <button
+        hx-post="/settings/run-pipeline"
+        hx-include="#pipeline-date"
+        hx-target="#pipeline-status-panel"
+        hx-swap="outerHTML"
+        hx-indicator="#run-spinner"
+        class="w-full bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium py-2 rounded-lg transition-colors flex items-center justify-center gap-2">
+        <span id="run-spinner" class="htmx-indicator">
+          <svg class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+        </span>
+        今すぐパイプラインを実行
+      </button>
+      <button
+        hx-post="/settings/run-news-refresh"
+        hx-target="#news-status-panel"
+        hx-swap="outerHTML"
+        hx-indicator="#news-spinner"
+        class="w-full bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium py-2 rounded-lg transition-colors flex items-center justify-center gap-2">
+        <span id="news-spinner" class="htmx-indicator">
+          <svg class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+        </span>
+        ニュースを今すぐ更新
+      </button>
+    </div>
+  </div>
+
+  <!-- 右カラム: 実行ログ -->
+  <div class="w-full md:w-72 md:shrink-0 space-y-4">
+    <div id="pipeline-status-panel"
+         hx-get="/settings/pipeline-status"
+         hx-trigger="load"
+         hx-swap="outerHTML"
+         class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+      <p class="text-xs text-gray-500">読み込み中...</p>
+    </div>
+    <div id="news-status-panel"
+         hx-get="/settings/news-status"
+         hx-trigger="load"
+         hx-swap="outerHTML"
+         class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+      <p class="text-xs text-gray-500">読み込み中...</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function updateLLMVisibility() {
+  const isGroq = document.querySelector('[name=llm_provider][value=groq]').checked;
+  document.getElementById('groq-settings').classList.toggle('hidden', !isGroq);
+}
+(function() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  document.getElementById('pipeline-date').value = `${yyyy}-${mm}-${dd}`;
+})();
+</script>
+{% endblock %}

@@ -1,4 +1,5 @@
 from sqlalchemy import String, Integer, Float, ForeignKey, Index
+from sqlalchemy import text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.stock import Base
 
@@ -32,4 +33,11 @@ class Briefing(Base):
 
     __table_args__ = (
         Index("idx_briefings_dip_event_id", "dip_event_id"),
+        Index(
+            "uq_briefings_latest",
+            "dip_event_id",
+            "briefing_type",
+            unique=True,
+            sqlite_where=text("is_latest = 1"),
+        ),
     )

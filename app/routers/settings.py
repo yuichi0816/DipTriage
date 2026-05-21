@@ -34,7 +34,10 @@ async def save_settings(
     request: Request,
     session: AsyncSession = Depends(get_db),
     auto_fetch_enabled: str = Form(default="off"),
-    market_scope: str = Form(...),
+    include_nikkei225: str = Form(default="off"),
+    include_standard: str = Form(default="off"),
+    include_growth: str = Form(default="off"),
+    include_sp500: str = Form(default="off"),
     pipeline_hour: int = Form(...),
     pipeline_minute: int = Form(...),
     llm_provider: str = Form(default="ollama"),
@@ -46,7 +49,10 @@ async def save_settings(
 ):
     settings = await _get_or_create_settings(session)
     settings.auto_fetch_enabled = 1 if auto_fetch_enabled == "on" else 0
-    settings.market_scope = market_scope
+    settings.include_nikkei225 = 1 if include_nikkei225 == "on" else 0
+    settings.include_standard  = 1 if include_standard  == "on" else 0
+    settings.include_growth    = 1 if include_growth    == "on" else 0
+    settings.include_sp500     = 1 if include_sp500     == "on" else 0
     settings.pipeline_hour = max(0, min(23, pipeline_hour))
     settings.pipeline_minute = max(0, min(59, pipeline_minute))
     settings.llm_provider = llm_provider

@@ -6,10 +6,11 @@ import logging
 import re
 from datetime import datetime, timezone
 
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import OLLAMA_MODEL_INTERVIEW
-from app.intelligence.ollama_client import generate
+from app.intelligence.llm_client import generate
 from app.models import Briefing, DipEvent, NewsArticle, NumericalAnalysis
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ def build_prompt(
         "",
         "必ず日本語で、以下のJSON形式のみで回答してください（他のテキスト不要）:",
         '{',
-        '  "situation_summary": "日本語で1〜2文で何が起きたかを説明",',
+        '  "situation_summary": "日本語で2〜3文で何が起きたかを説明",',
         '  "initial_class": "accident または incident または unknown"',
         '}',
     ]
@@ -122,6 +123,11 @@ async def run_interview(
     # DB 書き込みは別ブロックで rollback を管理
     try:
         now = datetime.now(timezone.utc).isoformat()
+        await session.execute(
+            update(Briefing)
+            .where(Briefing.dip_event_id == event.id, Briefing.briefing_type == "interview")
+            .values(is_latest=0)
+        )
         briefing = Briefing(
             dip_event_id=event.id,
             briefing_type="interview",
