@@ -11,7 +11,7 @@ from app.models.settings import AppSettings
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
-_CLASS_ORDER = {"accident": 0, "incident": 1, "unknown": 2, None: 3}
+_CLASS_ORDER = {"accident": 0, "incident": 1, "structural": 2, "macro": 3, "unknown": 4, None: 5}
 
 
 @router.get("/", response_class=HTMLResponse)
