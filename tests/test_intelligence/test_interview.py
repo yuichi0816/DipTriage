@@ -248,6 +248,36 @@ async def test_run_interview_saves_briefing_on_success():
     await engine.dispose()
 
 
+async def test_run_interview_does_not_downgrade_diagnosed_status():
+    engine, Session = await _setup_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    async with Session() as session:
+        event = DipEvent(
+            symbol="CRWD", detected_date="2024-07-19", trigger_date="2024-07-19",
+            change_pct_1d=-11.2, status="diagnosed", macro_flag=0,
+            created_at=now, updated_at=now,
+        )
+        session.add(event)
+        await session.commit()
+        await session.refresh(event)
+
+        llm_json = json.dumps({
+            "key_facts": "新着記事による再問診。",
+            "intentional": False, "recoverable": True, "company_specific": None,
+            "situation_summary": "続報あり。",
+        })
+        with patch("app.intelligence.interview.generate", new=AsyncMock(return_value=(llm_json, 1.0))):
+            briefing = await run_interview(session, event, None, [])
+
+    assert briefing is not None  # 問診結果は更新される
+    async with Session() as s2:
+        from sqlalchemy import select as sa_select
+        refreshed = (await s2.execute(sa_select(DipEvent).where(DipEvent.id == event.id))).scalar_one()
+        assert refreshed.status == "diagnosed"  # 巻き戻らない（監査 2-5）
+    await engine.dispose()
+
+
 async def test_run_interview_returns_none_on_llm_error():
     engine, Session = await _setup_db()
     now = datetime.now(timezone.utc).isoformat()

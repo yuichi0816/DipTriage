@@ -196,7 +196,9 @@ async def run_interview(
         )
         session.add(briefing)
 
-        event.status = "interviewed"
+        # 診断済みイベントの再問診でステータスを巻き戻さない（監査 2-5）
+        if event.status != "diagnosed":
+            event.status = "interviewed"
         event.updated_at = now
 
         await session.commit()

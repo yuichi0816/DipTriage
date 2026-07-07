@@ -13,7 +13,7 @@ from app.config import INDEX_SYMBOLS, THRESHOLD_DIP_PCT, MACRO_FILTER_PCT
 from app.database import AsyncSessionLocal
 from app.intelligence.interview import run_interview
 from app.intelligence.news_fetcher import fetch_and_save_news
-from app.models import DipEvent, IndexPrice, NewsArticle, NumericalAnalysis, PipelineRun, StockMeta, StockPrice
+from app.models import Briefing, DipEvent, IndexPrice, NewsArticle, NumericalAnalysis, PipelineRun, StockMeta, StockPrice
 from app.models.settings import AppSettings
 from app.models.watchlist import WatchlistEntry, WatchlistSnapshot
 from app.pipeline.analyzer import analyze_dip_event
@@ -479,7 +479,7 @@ async def run_news_refresh(
             on_stage(stage, current, total)
 
     since = (date.today() - timedelta(days=days)).isoformat()
-    stats: dict = {"events": 0, "news_fetched": 0, "interviewed": 0}
+    stats: dict = {"events": 0, "news_fetched": 0, "interviewed": 0, "skipped_no_new_news": 0}
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -495,16 +495,33 @@ async def run_news_refresh(
 
         logger.info("News refresh: %d events since %s", len(events), since)
 
+        new_counts: dict[int, int] = {}
         for i, event in enumerate(events, 1):
             _notify("ステップ 1/2：ニュース取得", str(i), str(len(events)))
             try:
                 articles = await fetch_and_save_news(session, event)
                 stats["news_fetched"] += len(articles)
+                new_counts[event.id] = len(articles)
             except Exception as e:
                 logger.warning("News fetch failed for %s: %s", event.symbol, e)
 
         for i, event in enumerate(events, 1):
             _notify("ステップ 2/2：AI問診", str(i), str(len(events)))
+            # 新着記事がなく問診済みならスキップ（監査 7-1: LLM コスト削減）
+            if new_counts.get(event.id, 0) == 0:
+                iw_r = await session.execute(
+                    select(Briefing)
+                    .where(
+                        Briefing.dip_event_id == event.id,
+                        Briefing.briefing_type == "interview",
+                        Briefing.is_latest == 1,
+                    )
+                    .limit(1)
+                )
+                if iw_r.scalars().first() is not None:
+                    stats["skipped_no_new_news"] += 1
+                    continue
+
             news_r = await session.execute(
                 select(NewsArticle)
                 .where(NewsArticle.dip_event_id == event.id, NewsArticle.is_duplicate == 0)
