@@ -1,3 +1,4 @@
+import json
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -10,6 +11,7 @@ from app.database import get_db
 from app.models import Briefing, DipEvent, NumericalAnalysis, StockMeta
 from app.models.stock import StockPrice
 from app.models.settings import AppSettings
+from app.models.pipeline_run import PipelineRun
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -163,6 +165,18 @@ async def dashboard(
         events.sort(key=lambda e: _CLASS_ORDER.get(interviews[e.id].initial_class if e.id in interviews else None, 5))
     # sort == "date" はデフォルト順のまま
 
+    # 最終パイプライン実行（監査 3-1: 失敗・0件検知の可視化）
+    run_r = await session.execute(
+        select(PipelineRun).order_by(desc(PipelineRun.id)).limit(1)
+    )
+    last_run = run_r.scalar_one_or_none()
+    last_run_stats: dict = {}
+    if last_run and last_run.stats_json:
+        try:
+            last_run_stats = json.loads(last_run.stats_json)
+        except ValueError:
+            last_run_stats = {}
+
     # 設定
     s_result = await session.execute(select(AppSettings).where(AppSettings.id == 1))
     settings = s_result.scalar_one_or_none()
@@ -185,4 +199,6 @@ async def dashboard(
         "min_weekly_drop": min_weekly_drop,
         "pipeline_status": request.app.state.pipeline_status,
         "news_status": request.app.state.news_status,
+        "last_run": last_run,
+        "last_run_stats": last_run_stats,
     })
