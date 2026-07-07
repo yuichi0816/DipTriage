@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.database import init_db, AsyncSessionLocal
 from app.models.settings import AppSettings
-from app.routers import dashboard, dip_detail, watchlist, settings as settings_router
+from app.routers import dashboard, dip_detail, watchlist, settings as settings_router, manual as manual_router
 from app.scheduler import PipelineStatus, reschedule_pipeline
 
 logging.basicConfig(
@@ -54,3 +54,4 @@ app.include_router(dashboard.router)
 app.include_router(dip_detail.router)
 app.include_router(watchlist.router)
 app.include_router(settings_router.router)
+app.include_router(manual_router.router)

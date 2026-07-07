@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer
+from sqlalchemy import Float, String, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.stock import Base
 
@@ -21,3 +21,5 @@ class AppSettings(Base):
     groq_model_diagnosis: Mapped[str] = mapped_column(String, default="llama-3.3-70b-versatile")
     news_refresh_days: Mapped[int] = mapped_column(Integer, default=5)
     dip_lookback_days: Mapped[int] = mapped_column(Integer, default=2)
+    threshold_dip_pct: Mapped[float] = mapped_column(Float, default=-5.0)
+    macro_filter_pct: Mapped[float] = mapped_column(Float, default=-2.0)

@@ -1,0 +1,419 @@
+{% extends "base.html" %}
+{% block title %}マニュアル — DipTriage{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto space-y-10">
+
+  <div>
+    <h1 class="text-2xl font-bold text-white mb-1">DipTriage マニュアル</h1>
+    <p class="text-gray-400 text-sm">株価急落銘柄が「事故（一時的）」か「事件・構造問題（本質的）」かを判断する材料を提示するツール。最終判断は人間が行う。</p>
+  </div>
+
+  <!-- 目次 -->
+  <nav class="bg-gray-900 border border-gray-800 rounded-lg p-5">
+    <p class="text-xs text-gray-500 uppercase tracking-wide mb-3">目次</p>
+    <ol class="space-y-1 text-sm text-blue-400">
+      <li><a href="#startup" class="hover:text-blue-300">1. 起動手順</a></li>
+      <li><a href="#workflow" class="hover:text-blue-300">2. 日次ワークフロー</a></li>
+      <li><a href="#screens" class="hover:text-blue-300">3. 画面説明</a></li>
+      <li><a href="#env" class="hover:text-blue-300">4. 環境変数</a></li>
+      <li><a href="#troubleshoot" class="hover:text-blue-300">5. トラブルシューティング</a></li>
+      <li><a href="#test" class="hover:text-blue-300">6. テスト実行</a></li>
+    </ol>
+  </nav>
+
+  <!-- 1. 起動手順 -->
+  <section id="startup" class="space-y-4">
+    <h2 class="text-xl font-semibold text-white border-b border-gray-800 pb-2">1. 起動手順</h2>
+
+    <div class="space-y-3">
+      <h3 class="text-base font-medium text-gray-200">1-1. Ollama を起動する（LLM が必要な場合）</h3>
+      <pre class="bg-gray-900 border border-gray-800 rounded-lg p-4 text-sm text-green-300 overflow-x-auto"><code># Ollama サービスを起動
+ollama serve
+
+# 必要なモデルを確認（未 pull の場合は pull）
+ollama list
+ollama pull qwen3.5:9b    # 問診用（速い）
+ollama pull qwen3.6:35b   # 診断用（精度高い・数分かかる）</code></pre>
+      <div class="bg-blue-950 border border-blue-800 rounded-lg px-4 py-3 text-sm text-blue-300">
+        <strong>Groq を使う場合:</strong> Ollama 不要。設定パネルで LLM プロバイダーを「Groq」に変更し、API キーを入力する。
+      </div>
+    </div>
+
+    <div class="space-y-3">
+      <h3 class="text-base font-medium text-gray-200">1-2. Web サーバーを起動する</h3>
+      <pre class="bg-gray-900 border border-gray-800 rounded-lg p-4 text-sm text-green-300 overflow-x-auto"><code>uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload \
+  --reload-exclude ".claude" --reload-exclude "*.log" --reload-exclude "data"</code></pre>
+      <p class="text-sm text-gray-400">ブラウザで <code class="bg-gray-800 px-1.5 py-0.5 rounded text-gray-200">http://localhost:8000</code> を開く。</p>
+    </div>
+  </section>
+
+  <!-- 2. 日次ワークフロー -->
+  <section id="workflow" class="space-y-4">
+    <h2 class="text-xl font-semibold text-white border-b border-gray-800 pb-2">2. 日次ワークフロー</h2>
+
+    <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-2 text-sm font-mono text-gray-300">
+      <p>毎朝 7:00 に自動実行（設定で変更可）</p>
+      <p class="pl-4 text-gray-500">↓</p>
+      <p>① 急落検知（前日比 -5% 以下 かつ マクロ要因でない銘柄）</p>
+      <p class="pl-4 text-gray-500">↓</p>
+      <p>② 数値分析（出来高・β値・PER/PBR・セクター相関）</p>
+      <p class="pl-4 text-gray-500">↓</p>
+      <p>③ ニュース取得（Yahoo Finance RSS）</p>
+      <p class="pl-4 text-gray-500">↓</p>
+      <p>④ 問診 LLM → 5クラス初期分類</p>
+      <p class="pl-4 text-gray-500">↓ ※ 自動処理ここまで</p>
+      <p>⑤ 診断 LLM → 詳細画面のボタンから手動起動</p>
+    </div>
+
+    <div>
+      <h3 class="text-base font-medium text-gray-200 mb-3">5クラス分類</h3>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm border-collapse">
+          <thead>
+            <tr class="text-left text-gray-500 border-b border-gray-800">
+              <th class="pb-2 pr-4">クラス</th>
+              <th class="pb-2 pr-4">意味</th>
+              <th class="pb-2">投資示唆</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-800">
+            <tr>
+              <td class="py-2 pr-4"><span class="inline-block bg-green-900 text-green-300 text-xs px-2 py-0.5 rounded-full font-medium">事故型</span></td>
+              <td class="py-2 pr-4 text-gray-300">偶発的ミス・外部イベント（一時的）</td>
+              <td class="py-2 text-green-400">買い場の可能性あり</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-4"><span class="inline-block bg-red-900 text-red-300 text-xs px-2 py-0.5 rounded-full font-medium">事件型</span></td>
+              <td class="py-2 pr-4 text-gray-300">不正・詐欺・意図的な悪質行為</td>
+              <td class="py-2 text-red-400">回避</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-4"><span class="inline-block bg-orange-900 text-orange-300 text-xs px-2 py-0.5 rounded-full font-medium">構造型</span></td>
+              <td class="py-2 pr-4 text-gray-300">競争力・ビジネスモデルの本質的劣化</td>
+              <td class="py-2 text-red-400">回避</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-4"><span class="inline-block bg-blue-900 text-blue-300 text-xs px-2 py-0.5 rounded-full font-medium">マクロ型</span></td>
+              <td class="py-2 pr-4 text-gray-300">金利・地政学・市場全体連動</td>
+              <td class="py-2 text-yellow-400">条件付き</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-4"><span class="inline-block bg-gray-800 text-gray-400 text-xs px-2 py-0.5 rounded-full font-medium">不明</span></td>
+              <td class="py-2 pr-4 text-gray-300">判断材料不足</td>
+              <td class="py-2 text-gray-400">様子見</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div>
+      <h3 class="text-base font-medium text-gray-200 mb-2">手動実行</h3>
+      <pre class="bg-gray-900 border border-gray-800 rounded-lg p-4 text-sm text-green-300 overflow-x-auto"><code># 本日分のパイプラインを手動実行
+uv run python scripts/run_pipeline_once.py
+
+# 過去日付でバックフィル（例: CrowdStrike 事例）
+uv run python scripts/backfill.py 2024-07-19</code></pre>
+      <p class="text-sm text-gray-400 mt-2">設定パネルの「パイプラインを今すぐ実行」ボタンからも手動実行できる。</p>
+    </div>
+  </section>
+
+  <!-- 3. 画面説明 -->
+  <section id="screens" class="space-y-8">
+    <h2 class="text-xl font-semibold text-white border-b border-gray-800 pb-2">3. 画面説明</h2>
+
+    <!-- ダッシュボード -->
+    <div class="space-y-4">
+      <h3 class="text-base font-semibold text-gray-100">ダッシュボード（<code class="text-gray-400 text-sm">/</code>）</h3>
+      <p class="text-sm text-gray-400">急落検知済みのイベント一覧。</p>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm border-collapse">
+          <thead>
+            <tr class="text-left text-gray-500 border-b border-gray-800">
+              <th class="pb-2 pr-4">表示項目</th>
+              <th class="pb-2">内容</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-800 text-gray-300">
+            <tr><td class="py-2 pr-4 text-gray-200">バッジ</td><td class="py-2">AI分類（事故型 / 事件型 / 構造型 / マクロ型 / 不明）+ 色分け</td></tr>
+            <tr>
+              <td class="py-2 pr-4 text-gray-200 align-top">ステータス</td>
+              <td class="py-2">
+                <div class="space-y-1">
+                  <div class="flex items-center gap-2">
+                    <span class="inline-block bg-gray-800 text-gray-400 text-xs px-1.5 py-0.5 rounded font-mono">検出済</span>
+                    <span class="text-gray-400 text-xs">急落を検知した直後</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="inline-block bg-gray-800 text-gray-400 text-xs px-1.5 py-0.5 rounded font-mono">分析済</span>
+                    <span class="text-gray-400 text-xs">数値分析完了。ニュース不足またはマクロ変動のためAI問診が未実施</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="inline-block bg-gray-800 text-gray-400 text-xs px-1.5 py-0.5 rounded font-mono">問診済</span>
+                    <span class="text-gray-400 text-xs">AI問診（5クラス初期分類）完了</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="inline-block bg-gray-800 text-gray-400 text-xs px-1.5 py-0.5 rounded font-mono">診断済</span>
+                    <span class="text-gray-400 text-xs">詳細ブリーフィング（手動）完了</span>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            <tr><td class="py-2 pr-4 text-gray-200">前日比 / 週間騰落率</td><td class="py-2">急落の大きさ</td></tr>
+            <tr><td class="py-2 pr-4 text-gray-200">出来高異常度</td><td class="py-2">20日平均比（例: 3.2倍）</td></tr>
+            <tr><td class="py-2 pr-4 text-gray-200">マクロフラグ</td><td class="py-2">市場全体の下落が原因の可能性（フラグ表示）</td></tr>
+            <tr><td class="py-2 pr-4 text-gray-200">状況要約</td><td class="py-2">AIが生成した1〜2行の概要</td></tr>
+            <tr><td class="py-2 pr-4 text-gray-200">回復率</td><td class="py-2">急落日終値から現在までの株価変化</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <p class="text-sm text-gray-400 mb-2">フィルタ・ソート:</p>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="text-left text-gray-500 border-b border-gray-800">
+                <th class="pb-2 pr-4">フィルタ</th>
+                <th class="pb-2">選択肢</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-800 text-gray-300">
+              <tr><td class="py-2 pr-4">期間</td><td class="py-2">全期間 / 7日 / 14日 / 30日</td></tr>
+              <tr><td class="py-2 pr-4">ステータス</td><td class="py-2">全て / 検知 / 分析済 / 問診済 / 診断済</td></tr>
+              <tr><td class="py-2 pr-4">市場</td><td class="py-2">全て / 日経225 / スタンダード / グロース / S&P 500</td></tr>
+              <tr><td class="py-2 pr-4">AI分類</td><td class="py-2">全て / 事故型 / 事件型 / 構造型 / マクロ型 / 不明</td></tr>
+              <tr><td class="py-2 pr-4">最小下落率</td><td class="py-2">-5% / -8% / -10% / -15% / 任意</td></tr>
+              <tr><td class="py-2 pr-4">ソート</td><td class="py-2">検知日 / 下落率 / 出来高異常度 / 分類順</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 詳細画面 -->
+    <div class="space-y-4">
+      <h3 class="text-base font-semibold text-gray-100">詳細画面（<code class="text-gray-400 text-sm">/dip/{id}</code>）</h3>
+      <p class="text-sm text-gray-400">銘柄行をクリックすると表示。</p>
+
+      <div class="space-y-3">
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2">
+          <p class="text-sm font-medium text-gray-200">数値分析セクション</p>
+          <ul class="text-sm text-gray-400 space-y-1 list-disc list-inside">
+            <li>前日比 / 週間騰落率</li>
+            <li>出来高異常度（20日平均比）</li>
+            <li>ボラティリティ（年率σ）と偏差（今回が何σか）</li>
+            <li>β値・セクター超過下落率・90日セクター相関</li>
+            <li>銘柄固有性スコア（0〜1）</li>
+            <li>PER / PBR / 自己資本比率 / 時価総額</li>
+          </ul>
+        </div>
+
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2">
+          <p class="text-sm font-medium text-gray-200">問診ブリーフィング（自動生成）</p>
+          <ul class="text-sm text-gray-400 space-y-1 list-disc list-inside">
+            <li>AI分類バッジ（5クラス）</li>
+            <li>Q1〜Q3の判断根拠</li>
+            <li>状況要約（2〜3文）</li>
+          </ul>
+        </div>
+
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2">
+          <p class="text-sm font-medium text-gray-200">診断ブリーフィング（手動実行）</p>
+          <ol class="text-sm text-gray-400 space-y-1 list-decimal list-inside">
+            <li><strong class="text-gray-300">「診断を実行」ボタン</strong>をクリック</li>
+            <li>「分析中（数分かかります）...」と表示される</li>
+            <li>完了すると以下が表示される</li>
+          </ol>
+          <ul class="text-sm text-gray-400 space-y-1 list-disc list-inside pl-4 mt-2">
+            <li>分類（最終判定）</li>
+            <li>事故サブタイプ（事故型の場合）: システム障害 / 一時的決算ミス / 製品リコール / 経営発言炎上 / 自然災害・外的要因</li>
+            <li>moat 評価（スイッチングコスト / ネットワーク効果 / 規制障壁 / ブランド依存度）</li>
+            <li><strong class="text-yellow-400">反証3件</strong>（「事件である可能性」）</li>
+            <li>類似ケース（1〜2件）</li>
+            <li>見落としリスク</li>
+            <li>確信度（high / medium / low）</li>
+          </ul>
+        </div>
+
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-1">
+          <p class="text-sm font-medium text-gray-200">ウォッチリスト操作</p>
+          <ul class="text-sm text-gray-400 space-y-1 list-disc list-inside">
+            <li>「ウォッチリストに追加」ボタンで登録</li>
+            <li>登録済みの場合は「ウォッチリストから削除」ボタンが表示</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ウォッチリスト -->
+    <div class="space-y-4">
+      <h3 class="text-base font-semibold text-gray-100">ウォッチリスト（<code class="text-gray-400 text-sm">/watchlist</code>）</h3>
+      <p class="text-sm text-gray-400">診断後の銘柄の経過観察ページ。</p>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm border-collapse">
+          <thead>
+            <tr class="text-left text-gray-500 border-b border-gray-800">
+              <th class="pb-2 pr-4">表示項目</th>
+              <th class="pb-2">内容</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-800 text-gray-300">
+            <tr><td class="py-2 pr-4">銘柄 / 登録日</td><td class="py-2">基本情報</td></tr>
+            <tr><td class="py-2 pr-4">急落時価格 → 現在価格</td><td class="py-2">株価の推移</td></tr>
+            <tr><td class="py-2 pr-4">回復率</td><td class="py-2">急落時比の株価回復度（例: +12.5%）</td></tr>
+            <tr><td class="py-2 pr-4">出来高比率</td><td class="py-2">現在 ÷ 急落時（正常化の目安）</td></tr>
+            <tr><td class="py-2 pr-4">新規ニュース数</td><td class="py-2">登録後に取得された新着記事数</td></tr>
+            <tr><td class="py-2 pr-4">AI分類</td><td class="py-2">診断時のバッジ</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 設定パネル -->
+    <div class="space-y-4">
+      <h3 class="text-base font-semibold text-gray-100">設定パネル（ダッシュボード左）</h3>
+      <p class="text-sm text-gray-400">ダッシュボード左側のパネルから設定を変更できる。変更後は「保存」ボタンを押す。</p>
+
+      <div class="space-y-3">
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2">
+          <p class="text-sm font-medium text-gray-200">自動取得</p>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm border-collapse">
+              <tbody class="divide-y divide-gray-800 text-gray-300">
+                <tr><td class="py-1.5 pr-4">自動取得 ON/OFF</td><td class="py-1.5 text-gray-400">パイプラインの自動実行を有効/無効化</td></tr>
+                <tr><td class="py-1.5 pr-4">実行時刻（時:分）</td><td class="py-1.5 text-gray-400">毎日何時に自動実行するか（JST）</td></tr>
+                <tr><td class="py-1.5 pr-4">急落スキャン日数</td><td class="py-1.5 text-gray-400">何日前までの銘柄をスキャンするか</td></tr>
+                <tr><td class="py-1.5 pr-4">ニュース更新日数</td><td class="py-1.5 text-gray-400">何日前までの銘柄のニュースを更新するか</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2">
+          <p class="text-sm font-medium text-gray-200">LLM プロバイダー</p>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm border-collapse">
+              <tbody class="divide-y divide-gray-800 text-gray-300">
+                <tr><td class="py-1.5 pr-4">Ollama（デフォルト）</td><td class="py-1.5 text-gray-400">ローカル PC で動作。API 料金不要・プライバシー保護</td></tr>
+                <tr><td class="py-1.5 pr-4">Groq</td><td class="py-1.5 text-gray-400">クラウド API。高速・高性能だが API キーが必要</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="text-sm text-gray-500">Groq を選んだ場合は API キーと使用モデルを入力する。</p>
+        </div>
+
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-1">
+          <p class="text-sm font-medium text-gray-200">手動操作ボタン</p>
+          <ul class="text-sm text-gray-400 space-y-1 list-disc list-inside">
+            <li><strong class="text-gray-300">パイプラインを今すぐ実行</strong>: 自動実行を待たずに即時実行</li>
+            <li><strong class="text-gray-300">ニュースを今すぐ更新</strong>: ニュース収集だけを即時実行</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. 環境変数 -->
+  <section id="env" class="space-y-4">
+    <h2 class="text-xl font-semibold text-white border-b border-gray-800 pb-2">4. 環境変数（.env ファイル）</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm border-collapse">
+        <thead>
+          <tr class="text-left text-gray-500 border-b border-gray-800">
+            <th class="pb-2 pr-4">変数</th>
+            <th class="pb-2 pr-4">デフォルト</th>
+            <th class="pb-2">説明</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-800 text-gray-300">
+          <tr><td class="py-2 pr-4 font-mono text-xs text-green-400">OLLAMA_HOST</td><td class="py-2 pr-4 font-mono text-xs">http://localhost:11434</td><td class="py-2 text-gray-400">Ollama のエンドポイント</td></tr>
+          <tr><td class="py-2 pr-4 font-mono text-xs text-green-400">OLLAMA_MODEL_INTERVIEW</td><td class="py-2 pr-4 font-mono text-xs">qwen3.5:9b</td><td class="py-2 text-gray-400">問診モデル</td></tr>
+          <tr><td class="py-2 pr-4 font-mono text-xs text-green-400">OLLAMA_MODEL_DIAGNOSIS</td><td class="py-2 pr-4 font-mono text-xs">qwen3.6:35b</td><td class="py-2 text-gray-400">診断モデル</td></tr>
+          <tr><td class="py-2 pr-4 font-mono text-xs text-green-400">THRESHOLD_DIP_PCT</td><td class="py-2 pr-4 font-mono text-xs">-5.0</td><td class="py-2 text-gray-400">急落検知の閾値（%）</td></tr>
+          <tr><td class="py-2 pr-4 font-mono text-xs text-green-400">MACRO_FILTER_PCT</td><td class="py-2 pr-4 font-mono text-xs">-2.0</td><td class="py-2 text-gray-400">マクロフィルタの閾値（%）</td></tr>
+          <tr><td class="py-2 pr-4 font-mono text-xs text-green-400">DB_PATH</td><td class="py-2 pr-4 font-mono text-xs">data/diptriage.db</td><td class="py-2 text-gray-400">SQLite DB のパス</td></tr>
+          <tr><td class="py-2 pr-4 font-mono text-xs text-green-400">PIPELINE_HOUR</td><td class="py-2 pr-4 font-mono text-xs">7</td><td class="py-2 text-gray-400">自動実行の時刻（時）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <p class="text-sm text-gray-400 mb-2">設定例（<code class="bg-gray-800 px-1.5 py-0.5 rounded text-gray-200">.env</code>）:</p>
+      <pre class="bg-gray-900 border border-gray-800 rounded-lg p-4 text-sm text-green-300 overflow-x-auto"><code>OLLAMA_HOST=http://192.168.1.100:11434
+OLLAMA_MODEL_DIAGNOSIS=qwen3.6:35b
+THRESHOLD_DIP_PCT=-7.0</code></pre>
+    </div>
+    <div class="bg-blue-950 border border-blue-800 rounded-lg px-4 py-3 text-sm text-blue-300">
+      <strong>注意:</strong> 実行時刻・LLM プロバイダーなど多くの設定は Web UI の設定パネルから変更できる。<code>.env</code> は起動時のデフォルト値として機能する。
+    </div>
+  </section>
+
+  <!-- 5. トラブルシューティング -->
+  <section id="troubleshoot" class="space-y-4">
+    <h2 class="text-xl font-semibold text-white border-b border-gray-800 pb-2">5. トラブルシューティング</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm border-collapse">
+        <thead>
+          <tr class="text-left text-gray-500 border-b border-gray-800">
+            <th class="pb-2 pr-4">症状</th>
+            <th class="pb-2 pr-4">原因</th>
+            <th class="pb-2">対処</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-800 text-gray-300">
+          <tr>
+            <td class="py-2.5 pr-4">診断ボタンが表示されない</td>
+            <td class="py-2.5 pr-4 text-gray-400">status が interviewed/diagnosed でない</td>
+            <td class="py-2.5 text-gray-400">問診が完了するまで待つ（下記「分析済で止まる」も参照）</td>
+          </tr>
+          <tr>
+            <td class="py-2.5 pr-4">「分析済」のまま問診が実行されない</td>
+            <td class="py-2.5 pr-4 text-gray-400">① マクロ変動フラグが立っている、または ② ニュース記事が取得できなかった</td>
+            <td class="py-2.5 text-gray-400">① マクロ時は正常動作。② 「ニュース更新」ボタンで再取得を試みる</td>
+          </tr>
+          <tr>
+            <td class="py-2.5 pr-4">「診断に失敗しました」</td>
+            <td class="py-2.5 pr-4 text-gray-400">Ollama が起動していない</td>
+            <td class="py-2.5 text-gray-400"><code class="bg-gray-800 px-1 rounded">ollama serve</code> を実行</td>
+          </tr>
+          <tr>
+            <td class="py-2.5 pr-4">問診で止まる（interviewed にならない）</td>
+            <td class="py-2.5 pr-4 text-gray-400">Ollama 未起動 / モデル未 pull</td>
+            <td class="py-2.5 text-gray-400"><code class="bg-gray-800 px-1 rounded">ollama list</code> で確認・pull</td>
+          </tr>
+          <tr>
+            <td class="py-2.5 pr-4">ダッシュボードが空</td>
+            <td class="py-2.5 pr-4 text-gray-400">データ未投入</td>
+            <td class="py-2.5 text-gray-400"><code class="bg-gray-800 px-1 rounded">scripts/backfill.py</code> でテストデータを投入</td>
+          </tr>
+          <tr>
+            <td class="py-2.5 pr-4">マクロフラグのイベントが多い</td>
+            <td class="py-2.5 pr-4 text-gray-400">市場全体が大きく下落している</td>
+            <td class="py-2.5 text-gray-400">正常動作（個別要因のみ分析対象）</td>
+          </tr>
+          <tr>
+            <td class="py-2.5 pr-4">分類が「不明」ばかり</td>
+            <td class="py-2.5 pr-4 text-gray-400">ニュース不足 / モデル精度の問題</td>
+            <td class="py-2.5 text-gray-400">Groq に切り替えて再実行</td>
+          </tr>
+          <tr>
+            <td class="py-2.5 pr-4">Groq で「APIキーエラー」</td>
+            <td class="py-2.5 pr-4 text-gray-400">キー入力ミス / 権限不足</td>
+            <td class="py-2.5 text-gray-400">設定パネルでキーを再入力</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 6. テスト実行 -->
+  <section id="test" class="space-y-4">
+    <h2 class="text-xl font-semibold text-white border-b border-gray-800 pb-2">6. テスト実行</h2>
+    <pre class="bg-gray-900 border border-gray-800 rounded-lg p-4 text-sm text-green-300 overflow-x-auto"><code>uv run pytest -v
+# → 83件以上 PASSED が期待値</code></pre>
+  </section>
+
+</div>
+{% endblock %}

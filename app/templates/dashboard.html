@@ -5,7 +5,7 @@
 <div class="flex flex-col gap-4 md:flex-row md:items-start">
 
   <!-- 左カラム: 設定 -->
-  <div class="w-full md:w-64 md:shrink-0 space-y-4 order-2 md:order-1">
+  <div id="settings-panel" class="w-full md:w-64 md:shrink-0 space-y-4 order-2 md:order-1">
     <h1 class="text-lg font-bold">設定</h1>
 
     <form method="post" action="/settings" class="space-y-4">
@@ -38,6 +38,24 @@
                  class="w-11 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-xs text-center
                         focus:outline-none focus:border-blue-500">
           <span class="text-xs text-gray-500">日分</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="text-xs text-gray-500 w-14 shrink-0">急落閾値</span>
+          <span class="text-xs text-gray-500">≤</span>
+          <input type="number" name="threshold_dip_pct" min="-30" max="-1" step="0.5"
+                 value="{{ settings.threshold_dip_pct if settings.threshold_dip_pct is not none else -5.0 }}"
+                 class="w-14 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-xs text-center
+                        focus:outline-none focus:border-blue-500">
+          <span class="text-xs text-gray-500">%</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="text-xs text-gray-500 w-14 shrink-0">マクロ閾値</span>
+          <span class="text-xs text-gray-500">≤</span>
+          <input type="number" name="macro_filter_pct" min="-10" max="-0.5" step="0.5"
+                 value="{{ settings.macro_filter_pct if settings.macro_filter_pct is not none else -2.0 }}"
+                 class="w-14 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-xs text-center
+                        focus:outline-none focus:border-blue-500">
+          <span class="text-xs text-gray-500">%</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="text-xs text-gray-500">ニュース</span>
@@ -187,7 +205,7 @@
       <h1 class="text-lg font-bold">急落リスト</h1>
       <div class="flex gap-1">
         {% for val, label in [('date','日付'),('change','下落率'),('volume','出来高'),('class','分類')] %}
-        <a href="/?sort={{ val }}"
+        <a href="/?sort={{ val }}&days={{ days }}&min_drop={{ min_drop }}&min_weekly_drop={{ min_weekly_drop }}{% for m in markets %}&market={{ m }}{% endfor %}{% for s in statuses %}&status={{ s }}{% endfor %}{% for c in classes %}&class={{ c }}{% endfor %}"
            class="px-2 py-0.5 text-xs rounded transition-colors
                   {% if sort == val %}bg-blue-600 text-white{% else %}bg-gray-800 text-gray-400 hover:bg-gray-700{% endif %}">
           {{ label }}
@@ -196,6 +214,107 @@
       </div>
     </div>
 
+    <!-- フィルタバー -->
+    <form id="filter-form" method="get" action="/" class="mb-3 space-y-1.5 text-xs">
+      <input type="hidden" name="sort" value="{{ sort }}">
+
+      <div class="flex items-center gap-1.5">
+        <span class="text-gray-500 w-14 shrink-0">期間</span>
+        {% for val, label in [(30,'30日'),(60,'60日'),(90,'90日'),(0,'すべて')] %}
+        <label class="cursor-pointer">
+          <input type="radio" name="days" value="{{ val }}"
+                 {% if days == val %}checked{% endif %}
+                 class="sr-only"
+                 onchange="document.getElementById('filter-form').submit()">
+          <span class="px-2 py-0.5 rounded transition-colors select-none
+                       {% if days == val %}bg-blue-600 text-white{% else %}bg-gray-800 text-gray-400 hover:bg-gray-700{% endif %}">
+            {{ label }}
+          </span>
+        </label>
+        {% endfor %}
+      </div>
+
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <span class="text-gray-500 w-14 shrink-0">市場</span>
+        {% for val, label in [('prime','プライム'),('standard','スタンダード'),('growth','グロース'),('US','US')] %}
+        <label class="cursor-pointer">
+          <input type="checkbox" name="market" value="{{ val }}"
+                 {% if val in markets %}checked{% endif %}
+                 class="sr-only"
+                 onchange="document.getElementById('filter-form').submit()">
+          <span class="px-2 py-0.5 rounded transition-colors select-none
+                       {% if val in markets %}bg-blue-600 text-white{% else %}bg-gray-800 text-gray-400 hover:bg-gray-700{% endif %}">
+            {{ label }}
+          </span>
+        </label>
+        {% endfor %}
+      </div>
+
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <span class="text-gray-500 w-14 shrink-0">状態</span>
+        {% for val, label in [('detected','検出済'),('analyzed','分析済'),('interviewed','問診済'),('diagnosed','診断済'),('watching','監視中'),('closed','完了')] %}
+        <label class="cursor-pointer">
+          <input type="checkbox" name="status" value="{{ val }}"
+                 {% if val in statuses %}checked{% endif %}
+                 class="sr-only"
+                 onchange="document.getElementById('filter-form').submit()">
+          <span class="px-2 py-0.5 rounded transition-colors select-none
+                       {% if val in statuses %}bg-blue-600 text-white{% else %}bg-gray-800 text-gray-400 hover:bg-gray-700{% endif %}">
+            {{ label }}
+          </span>
+        </label>
+        {% endfor %}
+      </div>
+
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <span class="text-gray-500 w-14 shrink-0">分類</span>
+        {% for val, label in [('accident','事故型'),('incident','事件型'),('structural','構造的'),('macro','マクロ'),('unknown','不明')] %}
+        <label class="cursor-pointer">
+          <input type="checkbox" name="class" value="{{ val }}"
+                 {% if val in classes %}checked{% endif %}
+                 class="sr-only"
+                 onchange="document.getElementById('filter-form').submit()">
+          <span class="px-2 py-0.5 rounded transition-colors select-none
+                       {% if val in classes %}bg-blue-600 text-white{% else %}bg-gray-800 text-gray-400 hover:bg-gray-700{% endif %}">
+            {{ label }}
+          </span>
+        </label>
+        {% endfor %}
+      </div>
+
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <span class="text-gray-500 w-14 shrink-0">急落</span>
+        <span class="text-gray-400">≤ −</span>
+        <input type="number" name="min_drop" value="{{ min_drop }}" min="0" max="50" step="1"
+               class="w-12 bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-center
+                      focus:outline-none focus:border-blue-500">
+        <span class="text-gray-400">%　週 ≤ −</span>
+        <input type="number" name="min_weekly_drop" value="{{ min_weekly_drop }}" min="0" max="50" step="1"
+               class="w-12 bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-center
+                      focus:outline-none focus:border-blue-500">
+        <span class="text-gray-400">%</span>
+        <button type="submit"
+                class="px-2 py-0.5 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors">
+          適用
+        </button>
+        {% if min_drop > 0 or min_weekly_drop > 0 %}
+        <button type="button"
+                onclick="document.querySelector('[name=min_drop]').value=0;document.querySelector('[name=min_weekly_drop]').value=0;document.getElementById('filter-form').submit();"
+                class="px-2 py-0.5 text-gray-500 hover:text-gray-300 transition-colors">
+          クリア
+        </button>
+        {% endif %}
+      </div>
+
+      <div class="flex justify-end">
+        <button type="button" id="reset-filters-btn"
+                class="text-xs text-gray-600 hover:text-gray-400 transition-colors">
+          フィルターをリセット
+        </button>
+      </div>
+
+    </form>
+
     {% if not events %}
       <p class="text-gray-400 text-sm">急落イベントがありません。パイプラインを実行してください。</p>
     {% endif %}
@@ -203,8 +322,8 @@
     {% for event in events %}
       {% set ana = analyses.get(event.id) %}
       {% set meta = meta_map.get(event.symbol) %}
-      <a href="/dip/{{ event.id }}" class="block mb-2">
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 hover:border-gray-600 transition-colors">
+      <div class="block mb-2 cursor-pointer group" onclick="location.href='/dip/{{ event.id }}'">
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 group-hover:border-gray-600 transition-colors">
           <div class="flex items-start justify-between gap-2">
             <div>
               <span class="font-bold text-white text-sm">{{ event.symbol }}</span>
@@ -217,6 +336,13 @@
               </div>
               {% if event.change_pct_5d %}
               <div class="text-xs {% if event.change_pct_5d <= -10 %}text-red-400 font-bold{% elif event.change_pct_5d <= -5 %}text-orange-400 font-semibold{% else %}text-gray-400{% endif %}">週間 {{ "%.1f"|format(event.change_pct_5d) }}%</div>
+              {% endif %}
+              {% set p = price_map.get(event.id) %}
+              {% if p %}
+              <div class="text-xs text-gray-500 mt-0.5">{{ p.dip_str }} → {{ p.recent_str }}</div>
+              <div class="text-xs {% if p.recovery_pct >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+                {% if p.recovery_pct >= 0 %}+{% endif %}{{ "%.1f"|format(p.recovery_pct) }}%
+              </div>
               {% endif %}
             </div>
           </div>
@@ -240,6 +366,17 @@
             <span class="bg-yellow-900 text-yellow-300 px-1.5 py-0.5 rounded">マクロ</span>
             {% endif %}
 
+            {% if event.symbol[-2:] == '.T' %}
+              {% set _yf_url = 'https://finance.yahoo.co.jp/search/?query=' + event.symbol[:-2] %}
+            {% else %}
+              {% set _yf_url = 'https://finance.yahoo.com/quote/' + event.symbol %}
+            {% endif %}
+            <a href="{{ _yf_url }}" target="_blank" rel="noopener noreferrer"
+               onclick="event.stopPropagation()"
+               class="bg-gray-800 text-gray-500 hover:text-blue-400 px-1.5 py-0.5 rounded text-xs transition-colors">
+              YF↗
+            </a>
+
             {% set interview = interviews.get(event.id) %}
             {% if interview %}
               {% if interview.initial_class == 'accident' %}
@@ -250,11 +387,18 @@
                 <span class="bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">不明</span>
               {% endif %}
             {% else %}
-              <span class="bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded">{{ event.status }}</span>
+              {% if event.status == 'analyzed' %}
+                <span class="bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded cursor-help"
+                      title="数値分析完了。ニュース記事不足またはマクロ変動のためAI問診が未実施">分析済</span>
+              {% elif event.status == 'detected' %}
+                <span class="bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded">検出済</span>
+              {% else %}
+                <span class="bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded">{{ event.status }}</span>
+              {% endif %}
             {% endif %}
           </div>
         </div>
-      </a>
+      </div>
     {% endfor %}
   </div>
 
@@ -304,5 +448,24 @@ function cascadeStages(n) {
   }
   document.getElementById('pipeline-max-stage').value = max || 1;
 }
+
+// フィルター・並べ替え状態の永続化
+(function() {
+  const KEY = 'diptriage_filters';
+  const search = window.location.search;
+  if (!search) {
+    const saved = localStorage.getItem(KEY);
+    if (saved) {
+      window.location.replace('/' + saved);
+      return;
+    }
+  } else {
+    localStorage.setItem(KEY, search);
+  }
+  document.getElementById('reset-filters-btn').addEventListener('click', function() {
+    localStorage.removeItem(KEY);
+    location.href = '/';
+  });
+})();
 </script>
 {% endblock %}

@@ -7,7 +7,15 @@
 </div>
 
 <div class="mb-6">
-  <h1 class="text-2xl font-bold text-white">{{ event.symbol }}</h1>
+  {% if event.symbol[-2:] == '.T' %}
+    {% set _yf_url = 'https://finance.yahoo.co.jp/search/?query=' + event.symbol[:-2] %}
+  {% else %}
+    {% set _yf_url = 'https://finance.yahoo.com/quote/' + event.symbol %}
+  {% endif %}
+  <h1 class="text-2xl font-bold text-white">
+    <a href="{{ _yf_url }}" target="_blank" rel="noopener noreferrer"
+       class="hover:text-blue-400 transition-colors">{{ event.symbol }}</a>
+  </h1>
   {% if meta %}<p class="text-gray-400 text-sm">{{ meta.name_ja or meta.name }} · {{ meta.market }} · {{ meta.sector or '—' }}</p>{% endif %}
   <p class="text-gray-500 text-xs mt-1">急落日: {{ event.trigger_date }} / 検知日: {{ event.detected_date }}</p>
 </div>
@@ -75,10 +83,71 @@
 
   {# バリュエーション #}
   {% if analysis.per or analysis.pbr or analysis.equity_ratio %}
-  <div class="mt-3 pt-3 border-t border-gray-800 flex flex-wrap gap-4 text-sm">
-    {% if analysis.per %}<div><span class="text-gray-500 text-xs">PER </span><span>{{ "%.1f"|format(analysis.per) }}</span></div>{% endif %}
-    {% if analysis.pbr %}<div><span class="text-gray-500 text-xs">PBR </span><span>{{ "%.2f"|format(analysis.pbr) }}</span></div>{% endif %}
-    {% if analysis.equity_ratio %}<div><span class="text-gray-500 text-xs">自己資本比率 </span><span>{{ "%.1f"|format(analysis.equity_ratio) }}%</span></div>{% endif %}
+  <div class="mt-3 pt-3 border-t border-gray-800">
+    <div class="flex flex-wrap items-end gap-5 text-sm">
+
+      {% if analysis.per %}
+      <div>
+        <div class="text-gray-500 text-xs mb-0.5">PER</div>
+        <span class="{% if analysis.per < 0 %}text-gray-500{% elif analysis.per < 15 %}text-green-400{% elif analysis.per > 30 %}text-yellow-400{% endif %}">
+          {{ "%.1f"|format(analysis.per) }}倍
+        </span>
+      </div>
+      {% endif %}
+
+      {% if analysis.pbr %}
+      <div>
+        <div class="text-gray-500 text-xs mb-0.5">PBR</div>
+        <span class="{% if analysis.pbr < 1 %}text-green-400{% elif analysis.pbr > 3 %}text-yellow-400{% endif %}">
+          {{ "%.2f"|format(analysis.pbr) }}倍
+        </span>
+      </div>
+      {% endif %}
+
+      {% if analysis.equity_ratio %}
+      <div>
+        <div class="text-gray-500 text-xs mb-0.5">自己資本比率</div>
+        <span class="{% if analysis.equity_ratio >= 40 %}text-green-400{% elif analysis.equity_ratio < 20 %}text-yellow-400{% endif %}">
+          {{ "%.1f"|format(analysis.equity_ratio) }}%
+        </span>
+      </div>
+      {% endif %}
+
+      {% if analysis.per or analysis.pbr %}
+      <button type="button" onclick="toggleMetricHelp('valuation-help')"
+              class="mb-0.5 w-5 h-5 rounded-full bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs flex items-center justify-center leading-none transition-colors">?</button>
+      {% endif %}
+
+    </div>
+
+    {# PER / PBR 解説（まとめて表示） #}
+    <div id="valuation-help" class="hidden mt-3 p-3 bg-gray-800 border border-gray-700 rounded-lg text-xs space-y-4">
+
+      <div class="space-y-2">
+        <p class="font-semibold text-gray-200">PER（株価収益率）とは？</p>
+        <p class="text-gray-400">株価が「年間の1株利益」の何倍かを示す。「今の株価は利益換算で何年分か」というイメージ。低いほど割安の目安。</p>
+        <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-400 pt-1 border-t border-gray-700">
+          <span class="text-green-400">〜15倍</span><span>割安圏（利益に比べ株価が低い）</span>
+          <span class="text-gray-300">15〜25倍</span><span>概ね適正な水準</span>
+          <span class="text-yellow-400">25倍〜</span><span>割高圏・または高成長期待</span>
+          <span class="text-gray-500">マイナス</span><span>赤字のため参考外</span>
+        </div>
+        <p class="text-gray-500">※業種によって水準は大きく異なる（IT系は高め、銀行・公益は低め）</p>
+      </div>
+
+      <div class="space-y-2 pt-3 border-t border-gray-700">
+        <p class="font-semibold text-gray-200">PBR（株価純資産倍率）とは？</p>
+        <p class="text-gray-400">株価が「1株あたり純資産（解散価値）」の何倍かを示す。「会社が今すぐ解散したときの資産に対して、株価が何倍か」というイメージ。</p>
+        <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-400 pt-1 border-t border-gray-700">
+          <span class="text-green-400">1倍未満</span><span>理論上の解散価値以下・割安シグナル</span>
+          <span class="text-gray-300">1〜3倍</span><span>一般的な水準</span>
+          <span class="text-yellow-400">3倍〜</span><span>収益性・成長への高い期待を反映</span>
+        </div>
+        <p class="text-gray-500">※1倍を割ると「割安」と言われるが、業績悪化が原因のこともある</p>
+      </div>
+
+    </div>
+
   </div>
   {% endif %}
   {% endif %}
@@ -93,17 +162,43 @@
 {# ── 問診結果（Phase 2 以降で表示） ── #}
 {% if interview %}
 <section class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
-  <h2 class="text-sm font-semibold text-gray-400 mb-2">問診</h2>
-  <p class="text-sm text-gray-200">{{ interview.situation_summary }}</p>
-  <div class="mt-2">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-sm font-semibold text-gray-400">問診</h2>
     {% if interview.initial_class == 'accident' %}
       <span class="bg-green-900 text-green-300 text-xs px-2 py-0.5 rounded">事故型</span>
     {% elif interview.initial_class == 'incident' %}
       <span class="bg-red-900 text-red-300 text-xs px-2 py-0.5 rounded">事件型</span>
+    {% elif interview.initial_class == 'structural' %}
+      <span class="bg-orange-900 text-orange-300 text-xs px-2 py-0.5 rounded">構造型</span>
+    {% elif interview.initial_class == 'macro' %}
+      <span class="bg-blue-900 text-blue-300 text-xs px-2 py-0.5 rounded">マクロ型</span>
     {% else %}
       <span class="bg-gray-700 text-gray-400 text-xs px-2 py-0.5 rounded">不明</span>
     {% endif %}
   </div>
+  <div class="space-y-2">
+    {% for line in interview.situation_summary.split('\n') %}
+      {% if line %}
+        {% if line.startswith('[') %}
+          <p class="text-xs text-gray-500 font-mono leading-relaxed">{{ line }}</p>
+        {% else %}
+          <p class="text-sm text-gray-200 leading-relaxed">{{ line }}</p>
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+  </div>
+</section>
+{% elif event.status == 'analyzed' %}
+<section class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
+  <h2 class="text-sm font-semibold text-gray-400 mb-2">問診</h2>
+  <p class="text-sm text-gray-500">
+    数値分析は完了していますが、AI問診は実行されていません。<br>
+    {% if event.macro_flag %}
+    市場全体の下落（マクロ変動）が検出されたためAI問診はスキップされました。
+    {% else %}
+    ニュース記事が取得できなかったためスキップされました。ダッシュボードの「ニュース更新」ボタンで再試行できます。
+    {% endif %}
+  </p>
 </section>
 {% endif %}
 
@@ -124,11 +219,19 @@
     hx-target="#diagnosis-container"
     hx-swap="outerHTML"
     hx-indicator="#diagnosis-spinner"
-    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg"
+    hx-disabled-elt="this"
+    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded-lg"
   >診断を実行</button>
-  <span id="diagnosis-spinner" class="htmx-indicator ml-2 text-sm text-gray-400">
-    分析中（数分かかります）...
-  </span>
+  <div id="diagnosis-spinner" class="htmx-indicator mt-3 flex items-center gap-3 p-3 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-300">
+    <svg class="animate-spin h-5 w-5 text-blue-400 shrink-0" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+    </svg>
+    <div>
+      <div class="font-medium text-white">AIが診断中です...</div>
+      <div class="text-xs text-gray-400 mt-0.5">LLMによる分析のため数分かかることがあります</div>
+    </div>
+  </div>
   {% endif %}
 </div>
 
@@ -149,4 +252,10 @@
   >ウォッチリストに追加</button>
   {% endif %}
 </div>
+
+<script>
+function toggleMetricHelp(id) {
+  document.getElementById(id)?.classList.toggle('hidden');
+}
+</script>
 {% endblock %}

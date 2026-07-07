@@ -74,8 +74,7 @@ async def diagnose_dip(
     if event.status not in ("interviewed", "diagnosed"):
         return templates.TemplateResponse(
             request, "partials/diagnosis_result.html",
-            {"dip_id": dip_id, "diagnosis": None, "error": "問診が完了していません"},
-            status_code=400,
+            {"dip_id": dip_id, "diagnosis": None, "error": "問診が完了していません（ステータス: " + event.status + "）"},
         )
 
     ana_r = await session.execute(
@@ -95,7 +94,6 @@ async def diagnose_dip(
         return templates.TemplateResponse(
             request, "partials/diagnosis_result.html",
             {"dip_id": dip_id, "diagnosis": None, "error": "問診データが見つかりません"},
-            status_code=400,
         )
 
     art_r = await session.execute(

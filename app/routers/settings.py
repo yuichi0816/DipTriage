@@ -46,6 +46,8 @@ async def save_settings(
     groq_model_diagnosis: str = Form(default="llama-3.3-70b-versatile"),
     news_refresh_days: int = Form(default=5),
     dip_lookback_days: int = Form(default=2),
+    threshold_dip_pct: float = Form(default=-5.0),
+    macro_filter_pct: float = Form(default=-2.0),
 ):
     settings = await _get_or_create_settings(session)
     settings.auto_fetch_enabled = 1 if auto_fetch_enabled == "on" else 0
@@ -62,6 +64,8 @@ async def save_settings(
     settings.groq_model_diagnosis = groq_model_diagnosis
     settings.news_refresh_days = max(1, min(30, news_refresh_days))
     settings.dip_lookback_days = max(2, min(10, dip_lookback_days))
+    settings.threshold_dip_pct = max(-30.0, min(-1.0, threshold_dip_pct))
+    settings.macro_filter_pct  = max(-10.0, min(-0.5, macro_filter_pct))
     settings.updated_at = datetime.now(timezone.utc).isoformat()
     await session.commit()
 

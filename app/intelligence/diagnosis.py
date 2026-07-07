@@ -44,7 +44,7 @@ def build_diagnosis_prompt(
     articles: list[NewsArticle],
     meta: StockMeta | None = None,
 ) -> str:
-    company = meta.company_name if meta else event.symbol
+    company = (meta.name_ja or meta.name) if meta else event.symbol
     exchange = meta.exchange if meta else "N/A"
     sector = meta.sector if meta else "N/A"
 

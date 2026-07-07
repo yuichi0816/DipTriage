@@ -1,11 +1,14 @@
+from datetime import date, timedelta
+
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select, desc
+from sqlalchemy import func, select, desc, tuple_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import Briefing, DipEvent, NumericalAnalysis, StockMeta
+from app.models.stock import StockPrice
 from app.models.settings import AppSettings
 
 router = APIRouter()
@@ -19,13 +22,54 @@ async def dashboard(
     request: Request,
     session: AsyncSession = Depends(get_db),
     sort: str = Query(default="date"),
+    days: int = Query(default=30, ge=0),
+    statuses: list[str] = Query(default=[], alias="status"),
+    markets: list[str] = Query(default=[], alias="market"),
+    classes: list[str] = Query(default=[], alias="class"),
+    min_drop: int = Query(default=0, ge=0),
+    min_weekly_drop: int = Query(default=0, ge=0),
 ):
-    # 急落イベント（DB は日付・下落率順に取得し、その後 Python でソート）
-    result = await session.execute(
-        select(DipEvent)
-        .order_by(desc(DipEvent.detected_date), desc(DipEvent.change_pct_1d))
-        .limit(50)
-    )
+    query = select(DipEvent)
+
+    if days > 0:
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        query = query.where(DipEvent.trigger_date >= cutoff)
+
+    if statuses:
+        query = query.where(DipEvent.status.in_(statuses))
+
+    if markets:
+        query = query.join(StockMeta, DipEvent.symbol == StockMeta.symbol)
+        _MARKET_CONDITIONS = {
+            "prime":    StockMeta.index_name == "Nikkei225",
+            "standard": StockMeta.index_name == "TSE Standard",
+            "growth":   StockMeta.index_name == "TSE Growth",
+            "US":       StockMeta.market == "US",
+        }
+        conditions = [_MARKET_CONDITIONS[m] for m in markets if m in _MARKET_CONDITIONS]
+        if conditions:
+            query = query.where(or_(*conditions))
+
+    if classes:
+        subq = (
+            select(Briefing.dip_event_id)
+            .where(
+                Briefing.briefing_type == "interview",
+                Briefing.is_latest == 1,
+                Briefing.initial_class.in_(classes),
+            )
+            .scalar_subquery()
+        )
+        query = query.where(DipEvent.id.in_(subq))
+
+    if min_drop > 0:
+        query = query.where(DipEvent.change_pct_1d <= -min_drop)
+
+    if min_weekly_drop > 0:
+        query = query.where(DipEvent.change_pct_5d <= -min_weekly_drop)
+
+    query = query.order_by(desc(DipEvent.detected_date), desc(DipEvent.change_pct_1d)).limit(50)
+    result = await session.execute(query)
     events = list(result.scalars().all())
 
     analyses: dict[int, NumericalAnalysis] = {}
@@ -58,6 +102,58 @@ async def dashboard(
         )
         interviews = {b.dip_event_id: b for b in br_result.scalars().all()}
 
+    # 急落日終値（バッチ取得）
+    trigger_pairs = [(e.symbol, e.trigger_date) for e in events]
+    sp_by_symbol_date: dict[tuple, StockPrice] = {}
+    if trigger_pairs:
+        dip_result = await session.execute(
+            select(StockPrice).where(
+                tuple_(StockPrice.symbol, StockPrice.date).in_(trigger_pairs)
+            )
+        )
+        sp_by_symbol_date = {(sp.symbol, sp.date): sp for sp in dip_result.scalars()}
+
+    # 直近終値（シンボルごとの最新日）
+    recent_prices: dict[str, StockPrice] = {}
+    if symbols:
+        subq = (
+            select(StockPrice.symbol, func.max(StockPrice.date).label("max_date"))
+            .where(StockPrice.symbol.in_(symbols))
+            .group_by(StockPrice.symbol)
+            .subquery()
+        )
+        recent_result = await session.execute(
+            select(StockPrice).join(
+                subq,
+                (StockPrice.symbol == subq.c.symbol) & (StockPrice.date == subq.c.max_date),
+            )
+        )
+        recent_prices = {sp.symbol: sp for sp in recent_result.scalars()}
+
+    # price_map: event.id → {dip_str, recent_str, recovery_pct}
+    price_map: dict[int, dict] = {}
+    for event in events:
+        dip_sp = sp_by_symbol_date.get((event.symbol, event.trigger_date))
+        recent_sp = recent_prices.get(event.symbol)
+        if dip_sp is None or recent_sp is None:
+            continue
+        meta = meta_map.get(event.symbol)
+        is_jp = meta is not None and meta.market == "JP"
+        dip_close = dip_sp.close
+        recent_close = recent_sp.close
+        recovery_pct = (recent_close - dip_close) / dip_close * 100
+        if is_jp:
+            dip_str = f"¥{dip_close:,.0f}"
+            recent_str = f"¥{recent_close:,.0f}"
+        else:
+            dip_str = f"${dip_close:.2f}"
+            recent_str = f"${recent_close:.2f}"
+        price_map[event.id] = {
+            "dip_str": dip_str,
+            "recent_str": recent_str,
+            "recovery_pct": recovery_pct,
+        }
+
     # Python ソート
     if sort == "change":
         events.sort(key=lambda e: e.change_pct_1d)
@@ -78,8 +174,15 @@ async def dashboard(
         "analyses": analyses,
         "meta_map": meta_map,
         "interviews": interviews,
+        "price_map": price_map,
         "settings": settings,
         "sort": sort,
+        "days": days,
+        "statuses": statuses,
+        "markets": markets,
+        "classes": classes,
+        "min_drop": min_drop,
+        "min_weekly_drop": min_weekly_drop,
         "pipeline_status": request.app.state.pipeline_status,
         "news_status": request.app.state.news_status,
     })

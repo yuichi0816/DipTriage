@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import nullslast, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from app.config import INDEX_SYMBOLS
+from app.config import INDEX_SYMBOLS, THRESHOLD_DIP_PCT, MACRO_FILTER_PCT
 from app.database import AsyncSessionLocal
 from app.intelligence.interview import run_interview
 from app.intelligence.news_fetcher import fetch_and_save_news
@@ -54,7 +54,6 @@ async def _upsert_stock_meta(session, stock_infos) -> None:
 
 
 async def _save_prices(session, price_rows) -> None:
-    now = datetime.now(timezone.utc).isoformat()
     for row in price_rows:
         stmt = sqlite_insert(StockPrice).values(
             symbol=row.symbol,
@@ -65,7 +64,17 @@ async def _save_prices(session, price_rows) -> None:
             close=row.close,
             volume=row.volume,
             adj_close=row.adj_close,
-        ).on_conflict_do_nothing(index_elements=["symbol", "date"])
+        ).on_conflict_do_update(
+            index_elements=["symbol", "date"],
+            set_=dict(
+                open=row.open,
+                high=row.high,
+                low=row.low,
+                close=row.close,
+                volume=row.volume,
+                adj_close=row.adj_close,
+            ),
+        )
         await session.execute(stmt)
     await session.commit()
 
@@ -80,6 +89,39 @@ async def _save_index_prices(session, index_rows) -> None:
         ).on_conflict_do_nothing(index_elements=["symbol", "date"])
         await session.execute(stmt)
     await session.commit()
+
+
+async def _recalculate_dip_change_pcts(session, candidates: list, target_date: str) -> None:
+    """既存 DipEvent の change_pct_1d / change_pct_5d を最新 DB 価格から再計算・更新する。
+    株式分割や yfinance の遡及調整で前日価格が変わった場合に備えた補正処理。
+    """
+    candidate_map = {c.symbol: c for c in candidates}
+    result = await session.execute(
+        select(DipEvent).where(DipEvent.trigger_date == target_date)
+    )
+    events = result.scalars().all()
+    now = datetime.now(timezone.utc).isoformat()
+    updated = 0
+    for event in events:
+        c = candidate_map.get(event.symbol)
+        if c is None:
+            continue
+        changed = False
+        if abs(c.change_pct_1d - event.change_pct_1d) > 0.05:
+            event.change_pct_1d = c.change_pct_1d
+            changed = True
+        if c.change_pct_5d is not None and (
+            event.change_pct_5d is None
+            or abs(c.change_pct_5d - event.change_pct_5d) > 0.05
+        ):
+            event.change_pct_5d = c.change_pct_5d
+            changed = True
+        if changed:
+            event.updated_at = now
+            updated += 1
+    if updated:
+        await session.commit()
+        logger.info("Recalculated change_pct for %d dip events on %s", updated, target_date)
 
 
 async def snapshot_watching_entries(session, today: str) -> None:
@@ -150,9 +192,11 @@ async def run_daily_pipeline(
         include_growth    = bool(getattr(app_settings, "include_growth",    0) if app_settings else 0)
         include_sp500     = bool(getattr(app_settings, "include_sp500",     1) if app_settings else 1)
         dip_lookback_days = app_settings.dip_lookback_days if app_settings else 2
+        threshold_dip_pct = app_settings.threshold_dip_pct if app_settings and app_settings.threshold_dip_pct is not None else THRESHOLD_DIP_PCT
+        macro_filter_pct  = app_settings.macro_filter_pct  if app_settings and app_settings.macro_filter_pct  is not None else MACRO_FILTER_PCT
 
         # ── 第0段階：銘柄マスター更新 ──
-        _notify("Stage 0: シンボル取得")
+        _notify("準備：銘柄データ取得")
         logger.info(
             "Stage 0: Fetching symbol universe (nikkei225=%s, standard=%s, growth=%s, sp500=%s)",
             include_nikkei225, include_standard, include_growth, include_sp500,
@@ -238,7 +282,7 @@ async def run_daily_pipeline(
         logger.info("Universe: %d stocks", len(all_stocks))
 
         # ── 第0段階：指数データ取得 ──
-        _notify("Stage 0: 指数データ取得")
+        _notify("準備：指数データ取得")
         has_jp = include_nikkei225 or include_standard or include_growth
         index_syms = (
             ([INDEX_SYMBOLS["JP"]] if has_jp else []) +
@@ -249,7 +293,7 @@ async def run_daily_pipeline(
         index_changes = {r.symbol: r.change_pct for r in index_rows if r.change_pct is not None}
 
         # ── 第0段階：株価データ取得 ──
-        _notify("Stage 0: 株価データ取得", "0", str(len(all_stocks)))
+        _notify("準備：株価データ取得", "0", str(len(all_stocks)))
         logger.info("Stage 0: Downloading stock prices (%d symbols)", len(all_stocks))
         all_symbols = [s.symbol for s in all_stocks]
 
@@ -265,14 +309,18 @@ async def run_daily_pipeline(
         logger.info("Saved %d price rows", len(price_rows))
 
         # ── 第1段階：急落検知 ──
-        _notify("Stage 1: 急落検知")
+        _notify("ステップ 1/4：急落検知")
         logger.info("Stage 1: Detecting dips")
-        macro_result = apply_macro_filter(index_changes)
+        macro_result = apply_macro_filter(index_changes, threshold=macro_filter_pct)
         if macro_result.is_macro_shock:
             logger.warning("MACRO SHOCK detected: %s", macro_result.note)
 
         candidates = await get_price_changes(session, target_date)
-        dip_candidates = screen_dips(candidates, macro_result=macro_result)
+
+        # 価格が遡及修正された場合に既存 DipEvent の変化率を補正
+        await _recalculate_dip_change_pcts(session, candidates, target_date)
+
+        dip_candidates = screen_dips(candidates, threshold=threshold_dip_pct, macro_result=macro_result)
         dip_events = await save_dip_events(session, dip_candidates, detected_date=target_date)
         stats["dips_detected"] = len(dip_events)
 
@@ -280,12 +328,12 @@ async def run_daily_pipeline(
             return stats
 
         # ── 第2段階：数値分析 ──
-        _notify("Stage 2: 数値分析", "0", str(len(dip_events)))
+        _notify("ステップ 2/4：数値分析", "0", str(len(dip_events)))
         logger.info("Stage 2: Analyzing %d dip events", len(dip_events))
         sym_to_meta = {s.symbol: s for s in all_stocks}
 
         for i, event in enumerate(dip_events, 1):
-            _notify("Stage 2: 数値分析", str(i), str(len(dip_events)))
+            _notify("ステップ 2/4：数値分析", str(i), str(len(dip_events)))
             meta = sym_to_meta.get(event.symbol)
             sector_etf = meta.sector_etf if meta else None
             market_index = INDEX_SYMBOLS.get("JP" if event.symbol.endswith(".T") else "US", "^GSPC")
@@ -300,10 +348,10 @@ async def run_daily_pipeline(
 
         # ── 第3段階a: ニュース取得 ──
         non_macro_events = [e for e in dip_events if not e.macro_flag]
-        _notify("Stage 3a: ニュース取得", "0", str(len(non_macro_events)))
+        _notify("ステップ 3/4：ニュース取得", "0", str(len(non_macro_events)))
         logger.info("Stage 3a: Fetching news for %d non-macro dips", len(non_macro_events))
         for i, event in enumerate(non_macro_events, 1):
-            _notify("Stage 3a: ニュース取得", str(i), str(len(non_macro_events)))
+            _notify("ステップ 3/4：ニュース取得", str(i), str(len(non_macro_events)))
             try:
                 articles = await fetch_and_save_news(session, event)
                 stats["news_fetched"] = stats.get("news_fetched", 0) + len(articles)
@@ -314,11 +362,11 @@ async def run_daily_pipeline(
             return stats
 
         # ── 第3段階b: LLM 問診 ──
-        _notify("Stage 3b: LLM インタビュー", "0", str(len(non_macro_events)))
+        _notify("ステップ 3/4：AI問診", "0", str(len(non_macro_events)))
         logger.info("Stage 3b: Running interview for %d dips", len(non_macro_events))
         stats["dips_interviewed"] = 0
         for i, event in enumerate(non_macro_events, 1):
-            _notify("Stage 3b: LLM インタビュー", str(i), str(len(non_macro_events)))
+            _notify("ステップ 3/4：AI問診", str(i), str(len(non_macro_events)))
             news_result = await session.execute(
                 select(NewsArticle)
                 .where(NewsArticle.dip_event_id == event.id, NewsArticle.is_duplicate == 0)
@@ -349,7 +397,7 @@ async def run_daily_pipeline(
         await session.commit()
 
         # ── 第4段階：ウォッチリスト スナップショット ──
-        _notify("Stage 4: ウォッチリスト更新")
+        _notify("ステップ 4/4：ウォッチリスト更新")
         logger.info("Stage 4: Snapshotting watching entries")
         try:
             await snapshot_watching_entries(session, target_date)
@@ -389,7 +437,7 @@ async def run_news_refresh(
         logger.info("News refresh: %d events since %s", len(events), since)
 
         for i, event in enumerate(events, 1):
-            _notify("Stage 3a: ニュース取得", str(i), str(len(events)))
+            _notify("ステップ 1/2：ニュース取得", str(i), str(len(events)))
             try:
                 articles = await fetch_and_save_news(session, event)
                 stats["news_fetched"] += len(articles)
@@ -397,7 +445,7 @@ async def run_news_refresh(
                 logger.warning("News fetch failed for %s: %s", event.symbol, e)
 
         for i, event in enumerate(events, 1):
-            _notify("Stage 3b: LLM インタビュー", str(i), str(len(events)))
+            _notify("ステップ 2/2：AI問診", str(i), str(len(events)))
             news_r = await session.execute(
                 select(NewsArticle)
                 .where(NewsArticle.dip_event_id == event.id, NewsArticle.is_duplicate == 0)
