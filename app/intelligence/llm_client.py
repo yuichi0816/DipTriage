@@ -21,6 +21,6 @@ async def generate(prompt: str, model: str, think: bool = False) -> tuple[str, f
     if settings and settings.llm_provider == "groq":
         groq_model = settings.groq_model_diagnosis if think else settings.groq_model_interview
         return await groq_client.generate(
-            prompt, model=groq_model, api_key=settings.groq_api_key or ""
+            prompt, model=groq_model, api_key=settings.groq_api_key or "", think=think
         )
     return await ollama_client.generate(prompt, model=model, think=think)

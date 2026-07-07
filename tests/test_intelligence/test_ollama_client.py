@@ -31,3 +31,37 @@ async def test_generate_passes_prompt_to_chat():
         chat_call = mock_instance.chat.call_args
         messages = chat_call.kwargs.get("messages") or chat_call.args[1]
         assert any("my special prompt" in str(m) for m in messages)
+
+
+async def test_generate_sets_deterministic_options():
+    mock_response = MagicMock()
+    mock_response.message.content = "ok"
+
+    with patch("app.intelligence.ollama_client.AsyncClient") as MockClient:
+        mock_instance = MockClient.return_value
+        mock_instance.chat = AsyncMock(return_value=mock_response)
+
+        from app.intelligence.ollama_client import generate
+        await generate("p", model="m")
+
+        options = mock_instance.chat.call_args.kwargs["options"]
+        assert options["temperature"] == 0.0
+        assert options["seed"] == 42
+        assert options["num_predict"] == 1024
+        # think=False → 短いタイムアウト
+        assert MockClient.call_args.kwargs["timeout"] == 120.0
+
+
+async def test_generate_think_mode_uses_long_timeout_and_budget():
+    mock_response = MagicMock()
+    mock_response.message.content = "ok"
+
+    with patch("app.intelligence.ollama_client.AsyncClient") as MockClient:
+        mock_instance = MockClient.return_value
+        mock_instance.chat = AsyncMock(return_value=mock_response)
+
+        from app.intelligence.ollama_client import generate
+        await generate("p", model="m", think=True)
+
+        assert MockClient.call_args.kwargs["timeout"] == 600.0
+        assert mock_instance.chat.call_args.kwargs["options"]["num_predict"] == 4096
