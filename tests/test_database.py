@@ -1,5 +1,7 @@
 """起動時スキーマ初期化の判定ロジックのテスト"""
-from app.database import choose_init_action
+import sqlite3
+
+from app.database import choose_init_action, set_sqlite_pragmas
 
 
 class TestChooseInitAction:
@@ -12,3 +14,10 @@ class TestChooseInitAction:
 
     def test_alembic_managed_db_upgrades(self):
         assert choose_init_action(["alembic_version", "dip_events"]) == "upgrade"
+
+
+def test_set_sqlite_pragmas_sets_busy_timeout():
+    conn = sqlite3.connect(":memory:")
+    set_sqlite_pragmas(conn)
+    assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    conn.close()

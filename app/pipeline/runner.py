@@ -31,6 +31,9 @@ from app.pipeline.fetcher import (
 
 logger = logging.getLogger(__name__)
 
+# 手動実行とスケジュール実行の同時実行を防ぐ（監査 3-4）
+_pipeline_lock = asyncio.Lock()
+
 
 async def _upsert_stock_meta(session, stock_infos) -> None:
     now = datetime.now(timezone.utc).isoformat()
@@ -201,17 +204,25 @@ async def run_daily_pipeline(
     max_stage: int = 4,
     trigger: str = "manual",
 ) -> dict:
-    """パイプラインを実行し、pipeline_runs に実行履歴を記録する（監査 3-1）。"""
-    run_id = await _record_run_start(trigger, target_date)
-    try:
-        stats = await _run_pipeline_stages(
-            target_date=target_date, on_stage=on_stage, max_stage=max_stage
-        )
-    except Exception as e:
-        await _record_run_end(run_id, "error", error=f"{type(e).__name__}: {e}")
-        raise
-    await _record_run_end(run_id, "done", stats=stats)
-    return stats
+    """パイプラインを実行し、pipeline_runs に実行履歴を記録する（監査 3-1）。
+
+    実行中に再入された場合はステージを実行せず skipped を返す（監査 3-4）。
+    """
+    if _pipeline_lock.locked():
+        logger.warning("Pipeline already running; skipping %s trigger", trigger)
+        return {"skipped": "already_running", "trigger": trigger}
+
+    async with _pipeline_lock:
+        run_id = await _record_run_start(trigger, target_date)
+        try:
+            stats = await _run_pipeline_stages(
+                target_date=target_date, on_stage=on_stage, max_stage=max_stage
+            )
+        except Exception as e:
+            await _record_run_end(run_id, "error", error=f"{type(e).__name__}: {e}")
+            raise
+        await _record_run_end(run_id, "done", stats=stats)
+        return stats
 
 
 async def _run_pipeline_stages(

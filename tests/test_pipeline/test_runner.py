@@ -1,4 +1,5 @@
 """run_daily_pipeline の実行履歴記録（pipeline_runs）のテスト"""
+import asyncio
 import pytest
 from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, patch
@@ -79,4 +80,29 @@ async def test_news_refresh_skips_interview_when_no_new_articles():
 
     mock_interview.assert_not_called()  # 新着ゼロ + 問診済み → スキップ（監査 7-1）
     assert stats["skipped_no_new_news"] == 1
+    await engine.dispose()
+
+
+async def test_concurrent_pipeline_second_run_skips():
+    engine, Session = await _setup_db()
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_stages(**kwargs):
+        started.set()
+        await release.wait()
+        return {"date": "2026-07-07", "dips_detected": 0}
+
+    with patch("app.pipeline.runner.AsyncSessionLocal", Session), \
+         patch("app.pipeline.runner._run_pipeline_stages", new=AsyncMock(side_effect=slow_stages)) as mock_stages:
+        from app.pipeline.runner import run_daily_pipeline
+        first_task = asyncio.create_task(run_daily_pipeline(trigger="schedule"))
+        await started.wait()
+        second = await run_daily_pipeline(trigger="manual")  # 実行中に再入
+        release.set()
+        first = await first_task
+
+    assert second == {"skipped": "already_running", "trigger": "manual"}
+    assert first["dips_detected"] == 0
+    assert mock_stages.await_count == 1  # 2本目はステージ未実行
     await engine.dispose()

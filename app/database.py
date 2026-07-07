@@ -1,5 +1,6 @@
 import asyncio
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from app.config import BASE_DIR, DATABASE_URL
@@ -7,6 +8,19 @@ from app.models import Base
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+
+def set_sqlite_pragmas(dbapi_conn) -> None:
+    """WAL + busy_timeout（監査 3-4）。同時読み書き時の database is locked を防ぐ。"""
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.close()
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _on_connect(dbapi_conn, _record):
+    set_sqlite_pragmas(dbapi_conn)
 
 
 def choose_init_action(existing_tables: list[str]) -> str:
