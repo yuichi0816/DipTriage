@@ -41,6 +41,25 @@ def classify_before_trigger(published_at: str | None, trigger_date: str) -> int 
         return None
 
 
+def normalize_published_at(published: str | None) -> str | None:
+    """RSS の公開日時を UTC ISO 8601 文字列に正規化する（監査 2-4）。
+
+    文字列ソートで時系列順になることを保証する。変換不能なら None。
+    """
+    if not published:
+        return None
+    try:
+        try:
+            dt = parsedate_to_datetime(published)
+        except Exception:
+            dt = datetime.fromisoformat(published)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
 import feedparser
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -91,6 +110,8 @@ async def fetch_and_save_news(session: AsyncSession, event: DipEvent) -> list[Ne
         if existing.scalar_one_or_none():
             continue
 
+        published = normalize_published_at(raw["published_at"])
+
         article = NewsArticle(
             dip_event_id=event.id,
             symbol=event.symbol,
@@ -99,11 +120,11 @@ async def fetch_and_save_news(session: AsyncSession, event: DipEvent) -> list[Ne
             source=raw["source"],
             source_type="news",
             priority=5,
-            published_at=raw["published_at"],
+            published_at=published,
             fetched_at=now,
             content_hash=compute_content_hash(raw["title"], url),
             is_duplicate=0,
-            before_trigger=classify_before_trigger(raw["published_at"], event.trigger_date),
+            before_trigger=classify_before_trigger(published, event.trigger_date),
         )
         session.add(article)
         saved.append(article)

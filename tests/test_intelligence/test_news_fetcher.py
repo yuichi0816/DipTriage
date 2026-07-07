@@ -1,4 +1,25 @@
-from app.intelligence.news_fetcher import classify_before_trigger, compute_content_hash
+from app.intelligence.news_fetcher import (
+    classify_before_trigger,
+    compute_content_hash,
+    normalize_published_at,
+)
+
+
+class TestNormalizePublishedAt:
+    def test_rfc2822_to_iso_utc(self):
+        assert normalize_published_at("Mon, 06 Jul 2026 12:34:56 +0900") == "2026-07-06T03:34:56+00:00"
+
+    def test_iso_input_normalized_to_utc(self):
+        assert normalize_published_at("2026-07-06T03:34:56+00:00") == "2026-07-06T03:34:56+00:00"
+
+    def test_naive_datetime_assumed_utc(self):
+        assert normalize_published_at("2026-07-06T03:34:56") == "2026-07-06T03:34:56+00:00"
+
+    def test_none_returns_none(self):
+        assert normalize_published_at(None) is None
+
+    def test_garbage_returns_none(self):
+        assert normalize_published_at("not a date") is None
 
 
 class TestComputeContentHash:
