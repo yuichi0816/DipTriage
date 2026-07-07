@@ -21,7 +21,9 @@ async def db_session():
     factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as s:
         # 初期レコードを挿入
-        s.add(AppSettings(id=1, auto_fetch_enabled=1, market_scope="japan_and_sp500",
+        s.add(AppSettings(id=1, auto_fetch_enabled=1,
+                          include_nikkei225=1, include_sp500=1,
+                          include_standard=0, include_growth=0,
                           pipeline_hour=7, pipeline_minute=0))
         await s.commit()
         yield s
@@ -58,7 +60,7 @@ async def test_get_settings_redirects(client):
 async def test_save_settings_updates_db(client, db_session):
     response = await client.post("/settings", data={
         "auto_fetch_enabled": "on",
-        "market_scope": "japan_only",
+        "include_nikkei225": "on",
         "pipeline_hour": "8",
         "pipeline_minute": "30",
         "dip_lookback_days": "3",
@@ -68,7 +70,8 @@ async def test_save_settings_updates_db(client, db_session):
     result = await db_session.execute(select(AppSettings).where(AppSettings.id == 1))
     settings = result.scalar_one()
     assert settings.auto_fetch_enabled == 1
-    assert settings.market_scope == "japan_only"
+    assert settings.include_nikkei225 == 1
+    assert settings.include_sp500 == 0
     assert settings.pipeline_hour == 8
     assert settings.pipeline_minute == 30
     assert settings.dip_lookback_days == 3
@@ -76,7 +79,7 @@ async def test_save_settings_updates_db(client, db_session):
 
 async def test_save_settings_dip_lookback_days_clamped(client, db_session):
     response = await client.post("/settings", data={
-        "market_scope": "japan_and_sp500",
+        "include_nikkei225": "on", "include_sp500": "on",
         "pipeline_hour": "7",
         "pipeline_minute": "0",
         "dip_lookback_days": "99",
@@ -90,7 +93,7 @@ async def test_save_settings_dip_lookback_days_clamped(client, db_session):
 
 async def test_save_settings_auto_fetch_off(client, db_session):
     response = await client.post("/settings", data={
-        "market_scope": "japan_and_sp500",
+        "include_nikkei225": "on", "include_sp500": "on",
         "pipeline_hour": "7",
         "pipeline_minute": "0",
     }, follow_redirects=False)
@@ -104,7 +107,7 @@ async def test_save_settings_auto_fetch_off(client, db_session):
 async def test_save_settings_reschedules(client):
     response = await client.post("/settings", data={
         "auto_fetch_enabled": "on",
-        "market_scope": "japan_and_sp500",
+        "include_nikkei225": "on", "include_sp500": "on",
         "pipeline_hour": "6",
         "pipeline_minute": "0",
     }, follow_redirects=False)

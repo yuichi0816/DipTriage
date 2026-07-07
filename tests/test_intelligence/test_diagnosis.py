@@ -111,7 +111,8 @@ def test_build_diagnosis_prompt_no_analysis_uses_na():
 
 def test_build_diagnosis_prompt_with_meta():
     meta = MagicMock()
-    meta.company_name = "CrowdStrike Holdings"
+    meta.name_ja = None
+    meta.name = "CrowdStrike Holdings"
     meta.exchange = "NASDAQ"
     meta.sector = "Technology"
 
