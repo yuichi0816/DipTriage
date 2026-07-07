@@ -5,6 +5,7 @@ from app.models.news import NewsArticle
 from app.models.briefing import Briefing
 from app.models.watchlist import WatchlistEntry, WatchlistSnapshot
 from app.models.settings import AppSettings
+from app.models.pipeline_run import PipelineRun
 
 __all__ = [
     "Base",
@@ -15,4 +16,5 @@ __all__ = [
     "Briefing",
     "WatchlistEntry", "WatchlistSnapshot",
     "AppSettings",
+    "PipelineRun",
 ]

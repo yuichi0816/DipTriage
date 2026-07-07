@@ -1,6 +1,7 @@
 """パイプラインオーケストレーター：第0〜2段階を順番に実行する"""
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -12,7 +13,7 @@ from app.config import INDEX_SYMBOLS, THRESHOLD_DIP_PCT, MACRO_FILTER_PCT
 from app.database import AsyncSessionLocal
 from app.intelligence.interview import run_interview
 from app.intelligence.news_fetcher import fetch_and_save_news
-from app.models import DipEvent, IndexPrice, NewsArticle, NumericalAnalysis, StockMeta, StockPrice
+from app.models import DipEvent, IndexPrice, NewsArticle, NumericalAnalysis, PipelineRun, StockMeta, StockPrice
 from app.models.settings import AppSettings
 from app.models.watchlist import WatchlistEntry, WatchlistSnapshot
 from app.pipeline.analyzer import analyze_dip_event
@@ -162,7 +163,57 @@ async def snapshot_watching_entries(session, today: str) -> None:
     await session.commit()
 
 
+async def _record_run_start(trigger: str, target_date: str | None) -> int:
+    async with AsyncSessionLocal() as session:
+        run = PipelineRun(
+            trigger=trigger,
+            status="running",
+            target_date=target_date,
+            started_at=datetime.now(timezone.utc).isoformat(),
+        )
+        session.add(run)
+        await session.commit()
+        await session.refresh(run)
+        return run.id
+
+
+async def _record_run_end(
+    run_id: int, status: str, stats: dict | None = None, error: str | None = None
+) -> None:
+    async with AsyncSessionLocal() as session:
+        run = await session.get(PipelineRun, run_id)
+        if run is None:
+            return
+        run.status = status
+        run.finished_at = datetime.now(timezone.utc).isoformat()
+        if stats is not None:
+            run.stats_json = json.dumps(stats, ensure_ascii=False)
+            run.target_date = stats.get("date", run.target_date)
+        if error is not None:
+            run.error = error[:2000]
+        await session.commit()
+
+
 async def run_daily_pipeline(
+    target_date: str | None = None,
+    on_stage: Callable[[str, str, str], None] | None = None,
+    max_stage: int = 4,
+    trigger: str = "manual",
+) -> dict:
+    """パイプラインを実行し、pipeline_runs に実行履歴を記録する（監査 3-1）。"""
+    run_id = await _record_run_start(trigger, target_date)
+    try:
+        stats = await _run_pipeline_stages(
+            target_date=target_date, on_stage=on_stage, max_stage=max_stage
+        )
+    except Exception as e:
+        await _record_run_end(run_id, "error", error=f"{type(e).__name__}: {e}")
+        raise
+    await _record_run_end(run_id, "done", stats=stats)
+    return stats
+
+
+async def _run_pipeline_stages(
     target_date: str | None = None,
     on_stage: Callable[[str, str, str], None] | None = None,
     max_stage: int = 4,
