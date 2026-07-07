@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -10,6 +11,7 @@ from app.database import init_db, AsyncSessionLocal
 from app.models.settings import AppSettings
 from app.routers import dashboard, dip_detail, watchlist, settings as settings_router, manual as manual_router
 from app.scheduler import PipelineStatus, reschedule_pipeline
+from app.security import BasicAuthMiddleware, OriginCheckMiddleware
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +50,22 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="DipTriage", lifespan=lifespan)
+
+app.add_middleware(OriginCheckMiddleware)
+
+_AUTH_PASSWORD = os.getenv("DIPTRIAGE_PASSWORD", "")
+if _AUTH_PASSWORD:
+    app.add_middleware(
+        BasicAuthMiddleware,
+        username=os.getenv("DIPTRIAGE_USER", "diptriage"),
+        password=_AUTH_PASSWORD,
+    )
+else:
+    logger.warning(
+        "DIPTRIAGE_PASSWORD が未設定のため認証なしで起動します。"
+        "Tailscale IP または 127.0.0.1 へのバインドを必ず併用してください。"
+    )
+
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 app.include_router(dashboard.router)

@@ -23,9 +23,16 @@ ollama pull qwen3.6:35b   # 診断用（精度高い・数分かかる）
 ### 2. Web サーバーを起動する
 
 ```powershell
-# プロジェクトディレクトリで実行
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude ".claude" --reload-exclude "*.log" --reload-exclude "data"
+# 通常運用（同一PCからのみアクセス。Tailscale 経由は `tailscale serve 8000` を併用）
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+
+# 開発時（コード編集の自動リロード付き）
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --reload-exclude ".claude" --reload-exclude "*.log" --reload-exclude "data"
 ```
+
+> **セキュリティ注意**: `--host 0.0.0.0` は LAN 全体に無認証で公開されるため使用しないこと。
+> LAN 内の他端末からアクセスしたい場合は `.env` に `DIPTRIAGE_PASSWORD` を設定して
+> Basic 認証を有効化した上で、Tailscale IP（100.x.x.x）にバインドする。
 
 ブラウザで **http://localhost:8000** を開く。
 
