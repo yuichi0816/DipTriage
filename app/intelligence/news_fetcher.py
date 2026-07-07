@@ -61,6 +61,7 @@ def normalize_published_at(published: str | None) -> str | None:
 
 
 import feedparser
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,13 +69,23 @@ from app.models import DipEvent, NewsArticle
 
 _RSS_US = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
 _RSS_JP = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=JP&lang=ja-JP"
+_RSS_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; DipTriage/1.0)"}
 
 
-def fetch_rss_articles(symbol: str) -> list[dict]:
+async def _fetch_bytes(url: str) -> bytes:
+    """タイムアウト付きで RSS を取得する（監査 3-2: feedparser 直 fetch はタイムアウト不能）。"""
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers=_RSS_HEADERS) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        return resp.content
+
+
+async def fetch_rss_articles(symbol: str) -> list[dict]:
     """Yahoo Finance RSS から記事リストを取得する。失敗時は空リストを返す。"""
     try:
         url = _RSS_JP.format(symbol=symbol) if symbol.endswith(".T") else _RSS_US.format(symbol=symbol)
-        feed = feedparser.parse(url)
+        content = await _fetch_bytes(url)
+        feed = feedparser.parse(content)
         articles = []
         for entry in feed.entries:
             source = getattr(getattr(entry, "source", None), "title", None)
@@ -92,7 +103,7 @@ def fetch_rss_articles(symbol: str) -> list[dict]:
 
 async def fetch_and_save_news(session: AsyncSession, event: DipEvent) -> list[NewsArticle]:
     """RSS を取得し、重複排除・before_trigger 分類を行い DB に保存する。"""
-    raw_articles = fetch_rss_articles(event.symbol)
+    raw_articles = await fetch_rss_articles(event.symbol)
     if not raw_articles:
         return []
 

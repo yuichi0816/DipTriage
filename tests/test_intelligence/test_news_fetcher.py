@@ -64,35 +64,37 @@ class TestClassifyBeforeTrigger:
         assert classify_before_trigger("not a date", "2024-07-19") is None
 
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestFetchRssArticles:
-    def test_returns_article_list_on_success(self):
+    async def test_returns_article_list_on_success(self):
         mock_feed = MagicMock()
         entry = MagicMock()
         entry.get = lambda k, d="": {"title": "CrowdStrike outage", "link": "http://y.com/1", "published": "Fri, 19 Jul 2024 10:00:00 GMT"}.get(k, d)
         entry.source.title = "Reuters"
         mock_feed.entries = [entry]
 
-        with patch("app.intelligence.news_fetcher.feedparser.parse", return_value=mock_feed):
+        with patch("app.intelligence.news_fetcher._fetch_bytes", new=AsyncMock(return_value=b"<rss/>")), \
+             patch("app.intelligence.news_fetcher.feedparser.parse", return_value=mock_feed):
             from app.intelligence.news_fetcher import fetch_rss_articles
-            articles = fetch_rss_articles("CRWD")
+            articles = await fetch_rss_articles("CRWD")
 
         assert len(articles) == 1
         assert articles[0]["title"] == "CrowdStrike outage"
         assert articles[0]["url"] == "http://y.com/1"
 
-    def test_returns_empty_list_on_error(self):
-        with patch("app.intelligence.news_fetcher.feedparser.parse", side_effect=Exception("err")):
+    async def test_returns_empty_list_on_error(self):
+        with patch("app.intelligence.news_fetcher._fetch_bytes", new=AsyncMock(side_effect=Exception("err"))):
             from app.intelligence.news_fetcher import fetch_rss_articles
-            assert fetch_rss_articles("CRWD") == []
+            assert await fetch_rss_articles("CRWD") == []
 
-    def test_jp_stock_uses_jp_region_url(self):
+    async def test_jp_stock_uses_jp_region_url(self):
         mock_feed = MagicMock()
         mock_feed.entries = []
-        with patch("app.intelligence.news_fetcher.feedparser.parse", return_value=mock_feed) as mock_parse:
+        with patch("app.intelligence.news_fetcher._fetch_bytes", new=AsyncMock(return_value=b"")) as mock_fetch, \
+             patch("app.intelligence.news_fetcher.feedparser.parse", return_value=mock_feed):
             from app.intelligence.news_fetcher import fetch_rss_articles
-            fetch_rss_articles("7203.T")
-            called_url = mock_parse.call_args[0][0]
+            await fetch_rss_articles("7203.T")
+            called_url = mock_fetch.call_args.args[0]
         assert "region=JP" in called_url

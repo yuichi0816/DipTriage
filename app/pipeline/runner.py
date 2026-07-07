@@ -1,6 +1,7 @@
 """パイプラインオーケストレーター：第0〜2段階を順番に実行する"""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable
@@ -256,7 +257,7 @@ async def _run_pipeline_stages(
         all_stocks: list[StockInfo] = []
 
         if include_nikkei225:
-            nikkei = get_nikkei225_symbols()
+            nikkei = await asyncio.to_thread(get_nikkei225_symbols)
             if not nikkei:
                 cached_r = await session.execute(
                     select(StockMeta).where(StockMeta.index_name == "Nikkei225", StockMeta.is_active == 1)
@@ -280,7 +281,7 @@ async def _run_pipeline_stages(
             all_stocks.extend(nikkei)
 
         if include_standard:
-            standard = get_tse_segment_symbols("スタンダード（内国株式）", "TSE Standard")
+            standard = await asyncio.to_thread(get_tse_segment_symbols, "スタンダード（内国株式）", "TSE Standard")
             if not standard:
                 cached_r = await session.execute(
                     select(StockMeta).where(StockMeta.index_name == "TSE Standard", StockMeta.is_active == 1)
@@ -304,7 +305,7 @@ async def _run_pipeline_stages(
             all_stocks.extend(standard)
 
         if include_growth:
-            growth = get_tse_segment_symbols("グロース（内国株式）", "TSE Growth")
+            growth = await asyncio.to_thread(get_tse_segment_symbols, "グロース（内国株式）", "TSE Growth")
             if not growth:
                 cached_r = await session.execute(
                     select(StockMeta).where(StockMeta.index_name == "TSE Growth", StockMeta.is_active == 1)
@@ -328,7 +329,7 @@ async def _run_pipeline_stages(
             all_stocks.extend(growth)
 
         if include_sp500:
-            all_stocks.extend(get_sp500_symbols())
+            all_stocks.extend(await asyncio.to_thread(get_sp500_symbols))
 
         await _upsert_stock_meta(session, all_stocks)
         logger.info("Universe: %d stocks", len(all_stocks))
@@ -340,7 +341,7 @@ async def _run_pipeline_stages(
             ([INDEX_SYMBOLS["JP"]] if has_jp else []) +
             ([INDEX_SYMBOLS["US"]] if include_sp500 else [])
         ) or list(INDEX_SYMBOLS.values())
-        index_rows = fetch_index_price_rows(index_syms, end_date=target_date)
+        index_rows = await asyncio.to_thread(fetch_index_price_rows, index_syms, end_date=target_date)
         await _save_index_prices(session, index_rows)
         index_changes = {r.symbol: r.change_pct for r in index_rows if r.change_pct is not None}
 
@@ -353,7 +354,7 @@ async def _run_pipeline_stages(
         sector_etfs = list({s.sector_etf for s in all_stocks if s.sector_etf})
         download_symbols = all_symbols + sector_etfs + index_syms
 
-        price_data = fetch_prices(download_symbols, days=dip_lookback_days, end_date=target_date)
+        price_data = await asyncio.to_thread(fetch_prices, download_symbols, days=dip_lookback_days, end_date=target_date)
         price_rows = []
         for sym, df in price_data.items():
             price_rows.extend(extract_price_rows(sym, df, n_days=dip_lookback_days))
