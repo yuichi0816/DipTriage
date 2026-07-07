@@ -323,7 +323,7 @@ async def run_daily_pipeline(
         if macro_result.is_macro_shock:
             logger.warning("MACRO SHOCK detected: %s", macro_result.note)
 
-        candidates = await get_price_changes(session, target_date)
+        candidates = await get_price_changes(session, target_date, symbols=all_symbols)
 
         # 価格が遡及修正された場合に既存 DipEvent の変化率を補正
         await _recalculate_dip_change_pcts(session, candidates, target_date)

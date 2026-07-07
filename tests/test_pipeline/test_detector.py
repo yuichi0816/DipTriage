@@ -1,12 +1,37 @@
 """急落検知純粋関数のユニットテスト"""
 import pytest
-from app.pipeline.detector import DipCandidate, MacroFilterResult, apply_macro_filter, resolve_target_date, screen_dips
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+from app.models import Base, StockPrice
+from app.pipeline.detector import DipCandidate, MacroFilterResult, apply_macro_filter, get_price_changes, resolve_target_date, screen_dips
 from app.pipeline.fetcher import PriceRow
 
 
 def _price_row(sym: str, date: str) -> PriceRow:
     return PriceRow(symbol=sym, date=date, open=None, high=None, low=None,
                     close=100.0, volume=None, adj_close=None)
+
+
+async def _setup_db():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    return engine, async_sessionmaker(engine, expire_on_commit=False)
+
+
+async def test_get_price_changes_filters_to_universe():
+    # ETF (XLE) が stock_prices にあってもユニバース指定で除外される（監査 2-3）
+    engine, Session = await _setup_db()
+    async with Session() as session:
+        for sym in ("AAA", "XLE"):
+            session.add(StockPrice(symbol=sym, date="2026-07-03", close=100.0))
+            session.add(StockPrice(symbol=sym, date="2026-07-06", close=90.0))
+        await session.commit()
+
+        candidates = await get_price_changes(session, "2026-07-06", symbols=["AAA"])
+
+    assert [c.symbol for c in candidates] == ["AAA"]
+    await engine.dispose()
 
 
 class TestApplyMacroFilter:
