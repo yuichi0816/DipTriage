@@ -328,6 +328,46 @@ async def test_run_diagnosis_second_run_updates_is_latest(db_session):
     assert second.is_latest == 1
 
 
+def test_parse_diagnosis_response_sets_parse_ok_flag():
+    ok = parse_diagnosis_response(json.dumps({"initial_class": "accident"}))
+    assert ok["parse_ok"] == 1
+
+    broken = parse_diagnosis_response("JSONが含まれない応答テキスト")
+    assert broken["parse_ok"] == 0
+    assert broken["initial_class"] == "unknown"
+
+
+async def test_run_diagnosis_records_raw_response_and_parse_ok(db_session):
+    from datetime import datetime, timezone
+    from app.models.dip import DipEvent
+    from app.models.briefing import Briefing
+
+    now = datetime.now(timezone.utc).isoformat()
+    event = DipEvent(
+        symbol="CRWD", detected_date="2026-07-06", trigger_date="2026-07-06",
+        change_pct_1d=-11.2, status="interviewed", macro_flag=0,
+        created_at=now, updated_at=now,
+    )
+    db_session.add(event)
+    await db_session.commit()
+    await db_session.refresh(event)
+
+    interview = Briefing(
+        dip_event_id=event.id, briefing_type="interview",
+        initial_class="accident", initial_class_jp="事故型",
+        created_at=now, is_latest=1,
+    )
+    db_session.add(interview)
+    await db_session.commit()
+
+    with patch("app.intelligence.diagnosis.generate", new=AsyncMock(return_value=("壊れた応答", 1.0))):
+        briefing = await run_diagnosis(db_session, event, None, interview, [])
+
+    assert briefing is not None
+    assert briefing.parse_ok == 0
+    assert briefing.raw_response == "壊れた応答"
+
+
 async def test_run_diagnosis_structural_maps_to_jp(db_session):
     from datetime import datetime, timezone
     from app.models.dip import DipEvent

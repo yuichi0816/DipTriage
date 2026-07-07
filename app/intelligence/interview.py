@@ -116,9 +116,9 @@ def build_prompt(
     return "\n".join(parts)
 
 
-def parse_llm_response(text: str) -> dict[str, str]:
+def parse_llm_response(text: str) -> dict:
     """LLM の応答から JSON を抽出し、3軸から分類を導出する。失敗時はフォールバック値を返す。"""
-    _fallback = {"situation_summary": "（解析失敗）", "initial_class": "unknown"}
+    _fallback = {"situation_summary": "（解析失敗）", "initial_class": "unknown", "parse_ok": 0}
     match = re.search(r'\{[^{}]+\}', text, re.DOTALL)
     if not match:
         return _fallback
@@ -148,6 +148,7 @@ def parse_llm_response(text: str) -> dict[str, str]:
         return {
             "situation_summary": "\n".join(parts),
             "initial_class": cls,
+            "parse_ok": 1,
         }
     except json.JSONDecodeError:
         return _fallback
@@ -192,6 +193,8 @@ async def run_interview(
             model_name=OLLAMA_MODEL_INTERVIEW,
             generation_sec=elapsed,
             created_at=now,
+            parse_ok=parsed.get("parse_ok", 1),
+            raw_response=text,
             is_latest=1,
         )
         session.add(briefing)

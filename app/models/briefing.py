@@ -30,6 +30,10 @@ class Briefing(Base):
 
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     is_latest: Mapped[int] = mapped_column(Integer, default=1)
+    # 1=LLM応答のパース成功, 0=フォールバック値で保存（監査 1-4）
+    parse_ok: Mapped[int] = mapped_column(Integer, default=1)
+    # パース失敗の事後調査用に LLM 生応答を保存（監査 6-4）
+    raw_response: Mapped[str | None] = mapped_column(String)
 
     __table_args__ = (
         Index("idx_briefings_dip_event_id", "dip_event_id"),

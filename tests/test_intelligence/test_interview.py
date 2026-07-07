@@ -278,6 +278,30 @@ async def test_run_interview_does_not_downgrade_diagnosed_status():
     await engine.dispose()
 
 
+async def test_run_interview_records_parse_failure():
+    engine, Session = await _setup_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    async with Session() as session:
+        event = DipEvent(
+            symbol="CRWD", detected_date="2024-07-19", trigger_date="2024-07-19",
+            change_pct_1d=-11.2, status="analyzed", macro_flag=0,
+            created_at=now, updated_at=now,
+        )
+        session.add(event)
+        await session.commit()
+        await session.refresh(event)
+
+        with patch("app.intelligence.interview.generate", new=AsyncMock(return_value=("JSONなし応答", 1.0))):
+            briefing = await run_interview(session, event, None, [])
+
+    assert briefing is not None
+    assert briefing.parse_ok == 0
+    assert briefing.raw_response == "JSONなし応答"
+    assert briefing.initial_class == "unknown"
+    await engine.dispose()
+
+
 async def test_run_interview_returns_none_on_llm_error():
     engine, Session = await _setup_db()
     now = datetime.now(timezone.utc).isoformat()

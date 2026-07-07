@@ -150,6 +150,7 @@ def parse_diagnosis_response(text: str) -> dict:
     }, ensure_ascii=False)
     result["moat_json"] = moat
     result["initial_class"] = normalize_class(result.get("initial_class"))
+    result["parse_ok"] = 1 if parsed else 0
     return result
 
 
@@ -194,6 +195,8 @@ async def run_diagnosis(
             model_name=OLLAMA_MODEL_DIAGNOSIS,
             generation_sec=elapsed,
             created_at=now,
+            parse_ok=parsed.get("parse_ok", 1),
+            raw_response=text,
             is_latest=1,
         )
         session.add(briefing)

@@ -207,6 +207,11 @@
   <section class="bg-gray-900 border border-gray-800 rounded-xl p-4">
     <div class="flex justify-between items-center mb-3">
       <h2 class="text-sm font-semibold text-gray-400">診断ブリーフィング</h2>
+      {% if diagnosis.parse_ok == 0 %}
+      <span class="text-xs text-amber-400 border border-amber-600 rounded px-2 py-0.5">
+        ⚠ AI応答の解析に失敗（結果は不完全・再実行を推奨）
+      </span>
+      {% endif %}
       <span class="text-xs text-gray-500">
         {{ diagnosis.model_name }} / {{ "%.1f"|format(diagnosis.generation_sec or 0) }}s
       </span>
