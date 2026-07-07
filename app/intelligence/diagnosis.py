@@ -15,6 +15,7 @@ from app.models.briefing import Briefing
 from app.models.dip import DipEvent
 from app.models.news import NewsArticle
 from app.models.stock import StockMeta
+from app.intelligence.taxonomy import CLASS_JP as _CLASS_JP, normalize_class
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +35,6 @@ _FALLBACK: dict = {
     "full_text": "",
 }
 
-_CLASS_JP = {"accident": "事故型", "incident": "事件型", "unknown": "不明"}
-
-
 def build_diagnosis_prompt(
     event: DipEvent,
     analysis: NumericalAnalysis | None,
@@ -54,6 +52,7 @@ def build_diagnosis_prompt(
     corr = f"{analysis.sector_corr_90d:.2f}" if analysis and analysis.sector_corr_90d else "N/A"
     per = f"{analysis.per:.1f}" if analysis and analysis.per else "N/A"
     pbr = f"{analysis.pbr:.1f}" if analysis and analysis.pbr else "N/A"
+    wk = f"{event.change_pct_5d:.1f}%" if event.change_pct_5d is not None else "N/A"
 
     news_lines = ""
     for i, a in enumerate(articles[:10], 1):
@@ -68,7 +67,7 @@ def build_diagnosis_prompt(
         f"- シンボル: {event.symbol} / 企業名: {company} / 市場: {exchange} / セクター: {sector}\n"
         f"- 検知日: {event.trigger_date}\n\n"
         "## 数値サマリー\n"
-        f"- 前日比: {event.change_pct_1d:.1f}% / 週間: {event.change_pct_5d:.1f}%\n"
+        f"- 前日比: {event.change_pct_1d:.1f}% / 週間: {wk}\n"
         f"- 出来高異常度: {vol}倍 / セクター相対: {sector_label}\n"
         f"- β値: {beta} / ETF相関: {corr}\n"
         f"- PER: {per} / PBR: {pbr}\n\n"
@@ -96,23 +95,23 @@ def build_diagnosis_prompt(
         f"銘柄: {event.symbol}（{company}）  市場: {exchange}\n"
         f"検知日: {event.trigger_date}\n\n"
         "■ 数値サマリー\n"
-        f"  前日比: {event.change_pct_1d:.1f}% / 週間: {event.change_pct_5d:.1f}% / 出来高異常度: {vol}倍\n"
+        f"  前日比: {event.change_pct_1d:.1f}% / 週間: {wk} / 出来高異常度: {vol}倍\n"
         f"  セクター相対: {sector_label} / β値: {beta} / ETF相関: {corr}\n"
         f"  PER: {per} / PBR: {pbr}\n\n"
-        "■ 原因分析\n  分類: [事故型/事件型 — サブタイプ]\n  根拠: [詳細]\n\n"
+        "■ 原因分析\n  分類: [事故型/事件型/構造型/マクロ型/不明 — 事故型の場合はサブタイプも]\n  根拠: [詳細]\n\n"
         "■ moat評価\n"
         "  スイッチングコスト: [高/中/低] / ネットワーク効果: [有/無]\n"
         "  規制参入障壁: [高/中/低] / ブランド依存度: [高/中/低]\n"
         "  → 総合: [評価]\n\n"
         "■ 類似ケース\n  [1〜2件]\n\n"
-        "■ 反証（事件である可能性）\n  1. [反証1]\n  2. [反証2]\n  3. [反証3]\n\n"
+        "■ 反証（この分類が誤っている可能性）\n  1. [反証1]\n  2. [反証2]\n  3. [反証3]\n\n"
         "■ 見落としリスク\n  [記入]\n\n"
         "■ 分析の確信度: [high/medium/low]\n  [根拠]\n"
         "━━━━━━━━━━━━━━━━\n\n"
         "## 出力（JSONのみ、他のテキスト不要）\n\n"
         "```json\n"
         "{\n"
-        '  "initial_class": "accident / incident / structural / macro / unknown — 上記2軸決定木に厳密に従うこと",\n'
+        '  "initial_class": "accident | incident | structural | macro | unknown のいずれか1語",\n'
         '  "accident_subtype": "システム障害/一時的決算ミス/製品リコール・品質問題/経営発言・炎上/自然災害・外的要因 のいずれか、またはnull",\n'
         '  "moat_switching_cost": "高/中/低",\n'
         '  "moat_network_effect": "有/無",\n'
@@ -150,6 +149,7 @@ def parse_diagnosis_response(text: str) -> dict:
         "summary": result.pop("moat_summary", ""),
     }, ensure_ascii=False)
     result["moat_json"] = moat
+    result["initial_class"] = normalize_class(result.get("initial_class"))
     return result
 
 

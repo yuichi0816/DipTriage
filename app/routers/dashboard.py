@@ -14,7 +14,7 @@ from app.models.settings import AppSettings
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
-_CLASS_ORDER = {"accident": 0, "incident": 1, "structural": 2, "macro": 3, "unknown": 4, None: 5}
+from app.intelligence.taxonomy import CLASS_ORDER as _CLASS_ORDER
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -160,7 +160,7 @@ async def dashboard(
     elif sort == "volume":
         events.sort(key=lambda e: -(analyses[e.id].volume_ratio_20d or 0) if e.id in analyses else 0)
     elif sort == "class":
-        events.sort(key=lambda e: _CLASS_ORDER.get(interviews[e.id].initial_class if e.id in interviews else None, 3))
+        events.sort(key=lambda e: _CLASS_ORDER.get(interviews[e.id].initial_class if e.id in interviews else None, 5))
     # sort == "date" はデフォルト順のまま
 
     # 設定

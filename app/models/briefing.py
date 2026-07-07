@@ -13,8 +13,8 @@ class Briefing(Base):
 
     # 問診結果（interview）
     situation_summary: Mapped[str | None] = mapped_column(String)
-    initial_class: Mapped[str | None] = mapped_column(String)     # accident | incident | unknown
-    initial_class_jp: Mapped[str | None] = mapped_column(String)  # 事故型 | 事件型 | 不明
+    initial_class: Mapped[str | None] = mapped_column(String)     # accident | incident | structural | macro | unknown
+    initial_class_jp: Mapped[str | None] = mapped_column(String)  # 事故型 | 事件型 | 構造型 | マクロ型 | 不明
 
     # 診断結果（diagnosis）
     accident_subtype: Mapped[str | None] = mapped_column(String)

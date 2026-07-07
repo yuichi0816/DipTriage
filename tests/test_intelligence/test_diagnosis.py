@@ -1,6 +1,6 @@
 import json
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from app.models.stock import Base
@@ -200,6 +200,28 @@ def test_parse_diagnosis_response_partial_json_fills_fallback():
     assert result["full_text"] == ""
 
 
+def test_parse_diagnosis_response_normalizes_invalid_class():
+    # LLM がプロンプトの説明文を丸写ししたケース（監査 1-2）
+    text = json.dumps({
+        "initial_class": "accident / incident / structural / macro / unknown — 上記2軸決定木に厳密に従うこと"
+    })
+    parsed = parse_diagnosis_response(text)
+    assert parsed["initial_class"] == "unknown"
+
+
+def test_parse_diagnosis_response_accepts_structural_and_macro():
+    assert parse_diagnosis_response(json.dumps({"initial_class": "structural"}))["initial_class"] == "structural"
+    assert parse_diagnosis_response(json.dumps({"initial_class": "macro"}))["initial_class"] == "macro"
+
+
+def test_build_diagnosis_prompt_output_example_covers_five_classes():
+    prompt = build_diagnosis_prompt(_make_event(), None, _make_interview(), [])
+    assert "事故型/事件型/構造型/マクロ型/不明" in prompt
+    assert "この分類が誤っている可能性" in prompt
+    # 説明文の丸写し事故を防ぐため、値指定は簡潔な列挙のみ
+    assert "厳密に従うこと" not in prompt
+
+
 @pytest.fixture
 async def db_session():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -304,3 +326,36 @@ async def test_run_diagnosis_second_run_updates_is_latest(db_session):
     await db_session.refresh(first)
     assert first.is_latest == 0
     assert second.is_latest == 1
+
+
+async def test_run_diagnosis_structural_maps_to_jp(db_session):
+    from datetime import datetime, timezone
+    from app.models.dip import DipEvent
+    from app.models.briefing import Briefing
+
+    now = datetime.now(timezone.utc).isoformat()
+    event = DipEvent(
+        symbol="7203.T", detected_date="2026-07-06", trigger_date="2026-07-06",
+        change_pct_1d=-6.5, status="interviewed", macro_flag=0,
+        created_at=now, updated_at=now,
+    )
+    db_session.add(event)
+    await db_session.commit()
+    await db_session.refresh(event)
+
+    interview = Briefing(
+        dip_event_id=event.id, briefing_type="interview",
+        initial_class="structural", initial_class_jp="構造型",
+        situation_summary="国内販売シェアの継続的低下。",
+        created_at=now, is_latest=1,
+    )
+    db_session.add(interview)
+    await db_session.commit()
+
+    llm_json = json.dumps({"initial_class": "structural", "confidence": "high"})
+    with patch("app.intelligence.diagnosis.generate", new=AsyncMock(return_value=(llm_json, 2.0))):
+        briefing = await run_diagnosis(db_session, event, None, interview, [])
+
+    assert briefing is not None
+    assert briefing.initial_class == "structural"
+    assert briefing.initial_class_jp == "構造型"

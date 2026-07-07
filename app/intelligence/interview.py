@@ -15,14 +15,7 @@ from app.models import Briefing, DipEvent, NewsArticle, NumericalAnalysis
 
 logger = logging.getLogger(__name__)
 
-_VALID_CLASSES = {"accident", "incident", "structural", "macro", "unknown"}
-_CLASS_JP = {
-    "accident": "事故型",
-    "incident": "事件型",
-    "structural": "構造型",
-    "macro": "マクロ型",
-    "unknown": "不明",
-}
+from app.intelligence.taxonomy import CLASS_JP as _CLASS_JP, VALID_CLASSES as _VALID_CLASSES
 
 
 def _derive_class(
