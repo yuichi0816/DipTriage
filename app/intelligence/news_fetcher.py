@@ -6,6 +6,13 @@ import logging
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
+import feedparser
+import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import DipEvent, NewsArticle
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,13 +66,6 @@ def normalize_published_at(published: str | None) -> str | None:
     except Exception:
         return None
 
-
-import feedparser
-import httpx
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.models import DipEvent, NewsArticle
 
 _RSS_US = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
 _RSS_JP = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=JP&lang=ja-JP"

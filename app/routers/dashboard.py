@@ -8,6 +8,7 @@ from sqlalchemy import func, select, desc, tuple_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.intelligence.taxonomy import CLASS_ORDER as _CLASS_ORDER
 from app.models import Briefing, DipEvent, NumericalAnalysis, StockMeta
 from app.models.stock import StockPrice
 from app.models.settings import AppSettings
@@ -15,8 +16,6 @@ from app.models.pipeline_run import PipelineRun
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
-
-from app.intelligence.taxonomy import CLASS_ORDER as _CLASS_ORDER
 
 
 @router.get("/", response_class=HTMLResponse)

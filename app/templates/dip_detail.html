@@ -163,7 +163,14 @@
 {% if interview %}
 <section class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
   <div class="flex items-center justify-between mb-3">
-    <h2 class="text-sm font-semibold text-gray-400">問診</h2>
+    <div class="flex items-center gap-2">
+      <h2 class="text-sm font-semibold text-gray-400">問診</h2>
+      {% if interview.parse_ok == 0 %}
+      <span class="text-xs text-amber-400 border border-amber-600 rounded px-2 py-0.5">
+        ⚠ AI応答の解析に失敗（結果は不完全・再実行を推奨）
+      </span>
+      {% endif %}
+    </div>
     {% if interview.initial_class == 'accident' %}
       <span class="bg-green-900 text-green-300 text-xs px-2 py-0.5 rounded">事故型</span>
     {% elif interview.initial_class == 'incident' %}

@@ -70,7 +70,6 @@ async def test_news_refresh_skips_interview_when_no_new_articles():
         s.add(Briefing(dip_event_id=event.id, briefing_type="interview",
                        initial_class="accident", created_at=now, is_latest=1))
         await s.commit()
-        event_id = event.id
 
     with patch("app.pipeline.runner.AsyncSessionLocal", Session), \
          patch("app.pipeline.runner.fetch_and_save_news", new=AsyncMock(return_value=[])), \

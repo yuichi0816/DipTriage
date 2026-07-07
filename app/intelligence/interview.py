@@ -11,11 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import OLLAMA_MODEL_INTERVIEW
 from app.intelligence.llm_client import generate
+from app.intelligence.taxonomy import CLASS_JP as _CLASS_JP
 from app.models import Briefing, DipEvent, NewsArticle, NumericalAnalysis
 
 logger = logging.getLogger(__name__)
-
-from app.intelligence.taxonomy import CLASS_JP as _CLASS_JP, VALID_CLASSES as _VALID_CLASSES
 
 
 def _derive_class(

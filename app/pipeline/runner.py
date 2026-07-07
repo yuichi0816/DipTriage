@@ -364,7 +364,7 @@ async def _run_pipeline_stages(
         # 自動実行時は対象日を実データの最新バー日付に解決する（監査 2-1）
         resolved = resolve_target_date(price_rows, requested_date, target_date)
         if resolved != target_date:
-            logger.info("Auto mode: resolved target_date %s -> %s (latest bar)", target_date, resolved)
+            logger.info("Date unspecified: resolved target_date %s -> %s (latest bar)", target_date, resolved)
             target_date = resolved
             stats["date"] = target_date
 

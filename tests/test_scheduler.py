@@ -5,6 +5,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app import scheduler as sched_mod
 
 
+@pytest.fixture(autouse=True)
+def _restore_scheduler_ref():
+    """モジュールグローバル _scheduler_ref をテスト間で汚染させない。"""
+    original = sched_mod._scheduler_ref
+    yield
+    sched_mod._scheduler_ref = original
+
+
 async def test_scheduled_run_success_does_not_schedule_retry():
     fake_scheduler = MagicMock()
     sched_mod._scheduler_ref = fake_scheduler
