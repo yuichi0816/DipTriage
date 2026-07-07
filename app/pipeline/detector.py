@@ -32,6 +32,19 @@ class DipCandidate:
     macro_note: str | None = None
 
 
+def resolve_target_date(price_rows: list, requested: str | None, today: str) -> str:
+    """自動実行時の対象日を「取得済みバーの最新日付」に解決する（監査 2-1）。
+
+    07:00 JST 時点では JP/US とも当日バーが存在しないため、
+    requested が None（自動実行）のときは実データの最新日付を対象日とする。
+    requested 指定時（手動バックフィル）はそのまま返す。
+    """
+    if requested:
+        return requested
+    dates = [r.date for r in price_rows]
+    return max(dates) if dates else today
+
+
 def apply_macro_filter(
     index_changes: dict[str, float],
     threshold: float = MACRO_FILTER_PCT,

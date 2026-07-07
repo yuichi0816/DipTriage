@@ -1,6 +1,12 @@
 """急落検知純粋関数のユニットテスト"""
 import pytest
-from app.pipeline.detector import DipCandidate, MacroFilterResult, apply_macro_filter, screen_dips
+from app.pipeline.detector import DipCandidate, MacroFilterResult, apply_macro_filter, resolve_target_date, screen_dips
+from app.pipeline.fetcher import PriceRow
+
+
+def _price_row(sym: str, date: str) -> PriceRow:
+    return PriceRow(symbol=sym, date=date, open=None, high=None, low=None,
+                    close=100.0, volume=None, adj_close=None)
 
 
 class TestApplyMacroFilter:
@@ -63,3 +69,18 @@ class TestScreenDips:
         candidates = [self._make_candidate("X", -5.0)]
         result = screen_dips(candidates, threshold=-5.0)
         assert len(result) == 1
+
+
+class TestResolveTargetDate:
+    def test_requested_date_passthrough(self):
+        # 手動バックフィル指定はそのまま尊重する
+        rows = [_price_row("A", "2026-07-06")]
+        assert resolve_target_date(rows, "2026-07-01", "2026-07-07") == "2026-07-01"
+
+    def test_auto_mode_uses_latest_available_bar(self):
+        # 07:00 JST 実行: 当日バーはまだ無い → 前営業日に解決される（監査 2-1）
+        rows = [_price_row("A", "2026-07-03"), _price_row("B", "2026-07-06")]
+        assert resolve_target_date(rows, None, "2026-07-07") == "2026-07-06"
+
+    def test_auto_mode_no_rows_falls_back_to_today(self):
+        assert resolve_target_date([], None, "2026-07-07") == "2026-07-07"

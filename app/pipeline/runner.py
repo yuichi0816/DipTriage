@@ -16,7 +16,7 @@ from app.models import DipEvent, IndexPrice, NewsArticle, NumericalAnalysis, Sto
 from app.models.settings import AppSettings
 from app.models.watchlist import WatchlistEntry, WatchlistSnapshot
 from app.pipeline.analyzer import analyze_dip_event
-from app.pipeline.detector import apply_macro_filter, get_price_changes, save_dip_events, screen_dips
+from app.pipeline.detector import apply_macro_filter, get_price_changes, resolve_target_date, save_dip_events, screen_dips
 from app.pipeline.fetcher import (
     StockInfo,
     extract_price_rows,
@@ -177,6 +177,7 @@ async def run_daily_pipeline(
         if on_stage:
             on_stage(stage, current, total)
 
+    requested_date = target_date
     if target_date is None:
         target_date = datetime.now().strftime("%Y-%m-%d")
 
@@ -307,6 +308,13 @@ async def run_daily_pipeline(
             price_rows.extend(extract_price_rows(sym, df, n_days=dip_lookback_days))
         await _save_prices(session, price_rows)
         logger.info("Saved %d price rows", len(price_rows))
+
+        # 自動実行時は対象日を実データの最新バー日付に解決する（監査 2-1）
+        resolved = resolve_target_date(price_rows, requested_date, target_date)
+        if resolved != target_date:
+            logger.info("Auto mode: resolved target_date %s -> %s (latest bar)", target_date, resolved)
+            target_date = resolved
+            stats["date"] = target_date
 
         # ── 第1段階：急落検知 ──
         _notify("ステップ 1/4：急落検知")
