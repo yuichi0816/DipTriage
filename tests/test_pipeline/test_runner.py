@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-from app.models import Base, Briefing, DipEvent, PipelineRun
+from app.models import Base, Briefing, DipEvent, PipelineRun, StockMeta
+from app.pipeline.fetcher import StockInfo
 
 
 async def _setup_db():
@@ -105,4 +106,30 @@ async def test_concurrent_pipeline_second_run_skips():
     assert second == {"skipped": "already_running", "trigger": "manual"}
     assert first["dips_detected"] == 0
     assert mock_stages.await_count == 1  # 2本目はステージ未実行
+    await engine.dispose()
+
+
+async def test_load_universe_prefers_fetched_symbols():
+    engine, Session = await _setup_db()
+    info = StockInfo(symbol="AAA", name="A Corp", market="US", exchange=None,
+                     sector=None, sector_etf=None, index_name="S&P500")
+    async with Session() as s:
+        from app.pipeline.runner import _load_universe
+        result = await _load_universe(s, lambda: [info], "S&P500")
+    assert result == [info]
+    await engine.dispose()
+
+
+async def test_load_universe_falls_back_to_cached_meta():
+    engine, Session = await _setup_db()
+    now = datetime.now(timezone.utc).isoformat()
+    async with Session() as s:
+        s.add(StockMeta(symbol="7203.T", name="Toyota", market="JP", exchange="TSE",
+                        index_name="Nikkei225", is_active=1,
+                        created_at=now, updated_at=now))
+        await s.commit()
+        from app.pipeline.runner import _load_universe
+        result = await _load_universe(s, lambda: [], "Nikkei225")
+    assert [x.symbol for x in result] == ["7203.T"]
+    assert result[0].index_name == "Nikkei225"
     await engine.dispose()

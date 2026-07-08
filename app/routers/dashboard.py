@@ -73,16 +73,13 @@ async def dashboard(
     result = await session.execute(query)
     events = list(result.scalars().all())
 
+    event_ids = [e.id for e in events]
     analyses: dict[int, NumericalAnalysis] = {}
-    for event in events:
-        a = await session.execute(
-            select(NumericalAnalysis)
-            .where(NumericalAnalysis.dip_event_id == event.id)
-            .limit(1)
+    if event_ids:
+        ana_result = await session.execute(
+            select(NumericalAnalysis).where(NumericalAnalysis.dip_event_id.in_(event_ids))
         )
-        ana = a.scalar_one_or_none()
-        if ana:
-            analyses[event.id] = ana
+        analyses = {a.dip_event_id: a for a in ana_result.scalars().all()}
 
     symbols = list({e.symbol for e in events})
     meta_result = await session.execute(
@@ -90,7 +87,6 @@ async def dashboard(
     )
     meta_map: dict[str, StockMeta] = {m.symbol: m for m in meta_result.scalars().all()}
 
-    event_ids = [e.id for e in events]
     interviews: dict[int, Briefing] = {}
     if event_ids:
         br_result = await session.execute(

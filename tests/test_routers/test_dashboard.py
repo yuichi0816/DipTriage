@@ -1,4 +1,5 @@
 import pytest
+from datetime import date, datetime, timezone
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -7,6 +8,7 @@ from unittest.mock import MagicMock
 from app.models.stock import Base
 from app.models.settings import AppSettings
 from app.models.pipeline_run import PipelineRun
+from app.models import DipEvent, NumericalAnalysis
 from app.main import app
 from app.database import get_db
 from app.scheduler import PipelineStatus
@@ -51,3 +53,20 @@ async def test_dashboard_shows_last_run_summary(client):
     assert response.status_code == 200
     assert "最終実行" in response.text
     assert "検知 2 件" in response.text
+
+
+async def test_dashboard_renders_analysis_without_n_plus_one(client, db_session):
+    now = datetime.now(timezone.utc).isoformat()
+    today = date.today().isoformat()
+    event = DipEvent(symbol="CRWD", detected_date=today, trigger_date=today,
+                     change_pct_1d=-8.0, macro_flag=0, status="analyzed",
+                     created_at=now, updated_at=now)
+    db_session.add(event)
+    await db_session.commit()
+    await db_session.refresh(event)
+    db_session.add(NumericalAnalysis(dip_event_id=event.id, volume_ratio_20d=4.2, created_at=now))
+    await db_session.commit()
+
+    response = await client.get("/")
+    assert response.status_code == 200
+    assert "4.2" in response.text  # 出来高異常度が一括クエリ経由で描画される

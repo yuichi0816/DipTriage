@@ -129,6 +129,37 @@ async def _recalculate_dip_change_pcts(session, candidates: list, target_date: s
         logger.info("Recalculated change_pct for %d dip events on %s", updated, target_date)
 
 
+async def _load_universe(
+    session,
+    fetch: Callable[[], list[StockInfo]],
+    index_name: str,
+) -> list[StockInfo]:
+    """銘柄ユニバースを取得する。Web 取得失敗時は DB キャッシュにフォールバック。"""
+    stocks = await asyncio.to_thread(fetch)
+    if stocks:
+        return stocks
+    cached_r = await session.execute(
+        select(StockMeta).where(StockMeta.index_name == index_name, StockMeta.is_active == 1)
+    )
+    cached = [
+        StockInfo(
+            symbol=s.symbol,
+            name=s.name or s.symbol,
+            market=s.market or "JP",
+            exchange=s.exchange or "TSE",
+            sector=s.sector,
+            sector_etf=None,
+            index_name=index_name,
+        )
+        for s in cached_r.scalars().all()
+    ]
+    if cached:
+        logger.warning("%s fetch failed; using %d cached symbols from DB.", index_name, len(cached))
+    else:
+        logger.error("No %s symbols from web or DB.", index_name)
+    return cached
+
+
 async def snapshot_watching_entries(session, today: str) -> None:
     """Stage 4: watching 中エントリの日次スナップショットを保存する。"""
     result = await session.execute(
@@ -268,76 +299,15 @@ async def _run_pipeline_stages(
         all_stocks: list[StockInfo] = []
 
         if include_nikkei225:
-            nikkei = await asyncio.to_thread(get_nikkei225_symbols)
-            if not nikkei:
-                cached_r = await session.execute(
-                    select(StockMeta).where(StockMeta.index_name == "Nikkei225", StockMeta.is_active == 1)
-                )
-                nikkei = [
-                    StockInfo(
-                        symbol=s.symbol,
-                        name=s.name or s.symbol,
-                        market=s.market or "JP",
-                        exchange=s.exchange or "TSE",
-                        sector=s.sector,
-                        sector_etf=None,
-                        index_name="Nikkei225",
-                    )
-                    for s in cached_r.scalars().all()
-                ]
-                if nikkei:
-                    logger.warning("Nikkei225 web scraping failed; using %d cached symbols from DB.", len(nikkei))
-                else:
-                    logger.error("No Nikkei225 symbols from web or DB.")
-            all_stocks.extend(nikkei)
+            all_stocks.extend(await _load_universe(session, get_nikkei225_symbols, "Nikkei225"))
 
         if include_standard:
-            standard = await asyncio.to_thread(get_tse_segment_symbols, "スタンダード（内国株式）", "TSE Standard")
-            if not standard:
-                cached_r = await session.execute(
-                    select(StockMeta).where(StockMeta.index_name == "TSE Standard", StockMeta.is_active == 1)
-                )
-                standard = [
-                    StockInfo(
-                        symbol=s.symbol,
-                        name=s.name or s.symbol,
-                        market=s.market or "JP",
-                        exchange=s.exchange or "TSE",
-                        sector=s.sector,
-                        sector_etf=None,
-                        index_name="TSE Standard",
-                    )
-                    for s in cached_r.scalars().all()
-                ]
-                if standard:
-                    logger.warning("TSE Standard JPX fetch failed; using %d cached symbols from DB.", len(standard))
-                else:
-                    logger.error("No TSE Standard symbols from JPX or DB.")
-            all_stocks.extend(standard)
+            all_stocks.extend(await _load_universe(
+                session, lambda: get_tse_segment_symbols("スタンダード（内国株式）", "TSE Standard"), "TSE Standard"))
 
         if include_growth:
-            growth = await asyncio.to_thread(get_tse_segment_symbols, "グロース（内国株式）", "TSE Growth")
-            if not growth:
-                cached_r = await session.execute(
-                    select(StockMeta).where(StockMeta.index_name == "TSE Growth", StockMeta.is_active == 1)
-                )
-                growth = [
-                    StockInfo(
-                        symbol=s.symbol,
-                        name=s.name or s.symbol,
-                        market=s.market or "JP",
-                        exchange=s.exchange or "TSE",
-                        sector=s.sector,
-                        sector_etf=None,
-                        index_name="TSE Growth",
-                    )
-                    for s in cached_r.scalars().all()
-                ]
-                if growth:
-                    logger.warning("TSE Growth JPX fetch failed; using %d cached symbols from DB.", len(growth))
-                else:
-                    logger.error("No TSE Growth symbols from JPX or DB.")
-            all_stocks.extend(growth)
+            all_stocks.extend(await _load_universe(
+                session, lambda: get_tse_segment_symbols("グロース（内国株式）", "TSE Growth"), "TSE Growth"))
 
         if include_sp500:
             all_stocks.extend(await asyncio.to_thread(get_sp500_symbols))
