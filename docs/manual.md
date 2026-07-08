@@ -34,6 +34,11 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --reload-exclu
 > LAN 内の他端末からアクセスしたい場合は `.env` に `DIPTRIAGE_PASSWORD` を設定して
 > Basic 認証を有効化した上で、Tailscale IP（100.x.x.x）にバインドする。
 
+### API キーと DB ファイルの取り扱い
+
+- Groq API キーは `.env` の `GROQ_API_KEY` での管理を推奨します（設定画面で保存した DB 内のキーより優先されます）。
+- SQLite DB（`DB_PATH`）は OneDrive などの同期フォルダの外に置くことを推奨します。同期処理とのロック競合・破損の原因になります。移動する場合は既存の `data/diptriage.db` を新しい場所へコピーし、`.env` の `DB_PATH` を書き換えてから起動してください。
+
 ブラウザで **http://localhost:8000** を開く。
 
 ---
