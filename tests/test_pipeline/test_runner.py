@@ -109,6 +109,15 @@ async def test_concurrent_pipeline_second_run_skips():
     await engine.dispose()
 
 
+async def test_news_refresh_skips_when_pipeline_lock_held():
+    from app.pipeline.runner import run_news_refresh, _pipeline_lock
+
+    async with _pipeline_lock:
+        result = await run_news_refresh()
+
+    assert result == {"skipped": "already_running"}
+
+
 async def test_load_universe_prefers_fetched_symbols():
     engine, Session = await _setup_db()
     info = StockInfo(symbol="AAA", name="A Corp", market="US", exchange=None,

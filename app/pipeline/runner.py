@@ -453,76 +453,84 @@ async def run_news_refresh(
     days: int = 5,
     on_stage: Callable[[str, str, str], None] | None = None,
 ) -> dict:
-    """Stage 3a + 3b のみ実行。過去 days 日以内の非マクロ DipEvent を対象とする。"""
+    """Stage 3a + 3b のみ実行。過去 days 日以内の非マクロ DipEvent を対象とする。
+
+    パイプライン実行中に再入された場合はスキップする（監査 3-4）。
+    """
+    if _pipeline_lock.locked():
+        logger.warning("Pipeline already running; skipping news refresh")
+        return {"skipped": "already_running"}
+
     from datetime import date, timedelta
 
-    def _notify(stage: str, current: str = "", total: str = "") -> None:
-        if on_stage:
-            on_stage(stage, current, total)
+    async with _pipeline_lock:
+        def _notify(stage: str, current: str = "", total: str = "") -> None:
+            if on_stage:
+                on_stage(stage, current, total)
 
-    since = (date.today() - timedelta(days=days)).isoformat()
-    stats: dict = {"events": 0, "news_fetched": 0, "interviewed": 0, "skipped_no_new_news": 0}
+        since = (date.today() - timedelta(days=days)).isoformat()
+        stats: dict = {"events": 0, "news_fetched": 0, "interviewed": 0, "skipped_no_new_news": 0}
 
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(DipEvent)
-            .where(DipEvent.macro_flag == 0, DipEvent.detected_date >= since)
-            .order_by(DipEvent.detected_date.desc())
-        )
-        events = result.scalars().all()
-        stats["events"] = len(events)
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(DipEvent)
+                .where(DipEvent.macro_flag == 0, DipEvent.detected_date >= since)
+                .order_by(DipEvent.detected_date.desc())
+            )
+            events = result.scalars().all()
+            stats["events"] = len(events)
 
-        meta_result = await session.execute(select(StockMeta))
-        sym_to_meta = {m.symbol: m for m in meta_result.scalars().all()}
+            meta_result = await session.execute(select(StockMeta))
+            sym_to_meta = {m.symbol: m for m in meta_result.scalars().all()}
 
-        logger.info("News refresh: %d events since %s", len(events), since)
+            logger.info("News refresh: %d events since %s", len(events), since)
 
-        new_counts: dict[int, int] = {}
-        for i, event in enumerate(events, 1):
-            _notify("ステップ 1/2：ニュース取得", str(i), str(len(events)))
-            try:
-                articles = await fetch_and_save_news(session, event)
-                stats["news_fetched"] += len(articles)
-                new_counts[event.id] = len(articles)
-            except Exception as e:
-                logger.warning("News fetch failed for %s: %s", event.symbol, e)
+            new_counts: dict[int, int] = {}
+            for i, event in enumerate(events, 1):
+                _notify("ステップ 1/2：ニュース取得", str(i), str(len(events)))
+                try:
+                    articles = await fetch_and_save_news(session, event)
+                    stats["news_fetched"] += len(articles)
+                    new_counts[event.id] = len(articles)
+                except Exception as e:
+                    logger.warning("News fetch failed for %s: %s", event.symbol, e)
 
-        for i, event in enumerate(events, 1):
-            _notify("ステップ 2/2：AI問診", str(i), str(len(events)))
-            # 新着記事がなく問診済みならスキップ（監査 7-1: LLM コスト削減）
-            if new_counts.get(event.id, 0) == 0:
-                iw_r = await session.execute(
-                    select(Briefing)
-                    .where(
-                        Briefing.dip_event_id == event.id,
-                        Briefing.briefing_type == "interview",
-                        Briefing.is_latest == 1,
+            for i, event in enumerate(events, 1):
+                _notify("ステップ 2/2：AI問診", str(i), str(len(events)))
+                # 新着記事がなく問診済みならスキップ（監査 7-1: LLM コスト削減）
+                if new_counts.get(event.id, 0) == 0:
+                    iw_r = await session.execute(
+                        select(Briefing)
+                        .where(
+                            Briefing.dip_event_id == event.id,
+                            Briefing.briefing_type == "interview",
+                            Briefing.is_latest == 1,
+                        )
+                        .limit(1)
                     )
-                    .limit(1)
+                    if iw_r.scalars().first() is not None:
+                        stats["skipped_no_new_news"] += 1
+                        continue
+
+                news_r = await session.execute(
+                    select(NewsArticle)
+                    .where(NewsArticle.dip_event_id == event.id, NewsArticle.is_duplicate == 0)
+                    .order_by(nullslast(NewsArticle.before_trigger.desc()), NewsArticle.published_at.desc())
+                    .limit(10)
                 )
-                if iw_r.scalars().first() is not None:
-                    stats["skipped_no_new_news"] += 1
+                articles = news_r.scalars().all()
+                if not articles:
+                    logger.warning("No news for %s, skipping interview", event.symbol)
                     continue
 
-            news_r = await session.execute(
-                select(NewsArticle)
-                .where(NewsArticle.dip_event_id == event.id, NewsArticle.is_duplicate == 0)
-                .order_by(nullslast(NewsArticle.before_trigger.desc()), NewsArticle.published_at.desc())
-                .limit(10)
-            )
-            articles = news_r.scalars().all()
-            if not articles:
-                logger.warning("No news for %s, skipping interview", event.symbol)
-                continue
+                ana_r = await session.execute(
+                    select(NumericalAnalysis).where(NumericalAnalysis.dip_event_id == event.id).limit(1)
+                )
+                analysis = ana_r.scalar_one_or_none()
+                meta = sym_to_meta.get(event.symbol)
+                briefing = await run_interview(session, event, analysis, articles, meta=meta)
+                if briefing:
+                    stats["interviewed"] += 1
 
-            ana_r = await session.execute(
-                select(NumericalAnalysis).where(NumericalAnalysis.dip_event_id == event.id).limit(1)
-            )
-            analysis = ana_r.scalar_one_or_none()
-            meta = sym_to_meta.get(event.symbol)
-            briefing = await run_interview(session, event, analysis, articles, meta=meta)
-            if briefing:
-                stats["interviewed"] += 1
-
-    logger.info("=== News refresh done: %s ===", stats)
-    return stats
+        logger.info("=== News refresh done: %s ===", stats)
+        return stats

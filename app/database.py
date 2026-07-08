@@ -38,6 +38,9 @@ def _run_alembic(action: str) -> None:
 
     cfg = Config(str(BASE_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BASE_DIR / "alembic"))
+    # 注: マイグレーションは env.py が独自エンジンを張るため WAL/busy_timeout プラグマ
+    # （app/database.py の connect リスナー）は適用されない。init_db() は lifespan で
+    # 完全に await されてからリクエスト/ジョブが動くため、移行中の同時書き込みは発生しない。
     if action == "create_and_stamp":
         command.stamp(cfg, "head")
     else:
