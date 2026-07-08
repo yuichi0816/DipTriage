@@ -28,7 +28,7 @@ class NewsArticle(Base):
     extra_json: Mapped[str | None] = mapped_column(String)
 
     __table_args__ = (
-        UniqueConstraint("url", name="uq_news_articles_url"),
+        UniqueConstraint("dip_event_id", "url", name="uq_news_articles_event_url"),
         Index("idx_news_dip_event_id", "dip_event_id"),
         Index("idx_news_published_at", "published_at"),
     )

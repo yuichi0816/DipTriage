@@ -116,7 +116,9 @@ async def fetch_and_save_news(session: AsyncSession, event: DipEvent) -> list[Ne
             continue
 
         existing = await session.execute(
-            select(NewsArticle).where(NewsArticle.url == url).limit(1)
+            select(NewsArticle)
+            .where(NewsArticle.dip_event_id == event.id, NewsArticle.url == url)
+            .limit(1)
         )
         if existing.scalar_one_or_none():
             continue
