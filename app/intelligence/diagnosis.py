@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import OLLAMA_MODEL_DIAGNOSIS
 from app.intelligence.llm_client import generate
+from app.intelligence.prompt_utils import NEWS_GUARD, sanitize_headline
 from app.models.analysis import NumericalAnalysis
 from app.models.briefing import Briefing
 from app.models.dip import DipEvent
@@ -57,7 +58,7 @@ def build_diagnosis_prompt(
     news_lines = ""
     for i, a in enumerate(articles[:10], 1):
         label = "[急落前]" if a.before_trigger else "[急落後]"
-        news_lines += f"{i}. {label} {a.title}\n   {a.url}\n"
+        news_lines += f"{i}. {label} {sanitize_headline(a.title)}\n   {sanitize_headline(a.url, max_len=300)}\n"
     if not news_lines:
         news_lines = "（記事なし）"
 
@@ -89,7 +90,7 @@ def build_diagnosis_prompt(
         "    → YES: structural（構造型）\n"
         "    → NO : macro（マクロ型・金利/地政学/市場全体連動）\n\n"
         "判断不能な場合は unknown。\n\n"
-        f"## 関連ニュース\n{news_lines}\n"
+        f"## 関連ニュース\n{NEWS_GUARD}\n{news_lines}\n"
         "## 出力フォーマット例\n\n"
         "━━ 診断ブリーフィング ━━\n"
         f"銘柄: {event.symbol}（{company}）  市場: {exchange}\n"

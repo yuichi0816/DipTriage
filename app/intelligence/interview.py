@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import OLLAMA_MODEL_INTERVIEW
 from app.intelligence.llm_client import generate
+from app.intelligence.prompt_utils import NEWS_GUARD, sanitize_headline
 from app.intelligence.taxonomy import CLASS_JP as _CLASS_JP
 from app.models import Briefing, DipEvent, NewsArticle, NumericalAnalysis
 
@@ -64,7 +65,7 @@ def build_prompt(
             lbl = "[後]"
         else:
             lbl = "[?]"
-        news_lines.append(f"{i}. {lbl} {art.title}")
+        news_lines.append(f"{i}. {lbl} {sanitize_headline(art.title)}")
 
     news_section = "\n".join(news_lines) if news_lines else "（ニュースなし）"
 
@@ -81,6 +82,7 @@ def build_prompt(
     parts += [
         "",
         "【関連ニュース（急落前後）】",
+        NEWS_GUARD,
         news_section,
         "",
         "【2軸分類フロー】",
