@@ -1,6 +1,7 @@
 """純粋関数のユニットテスト（DB・ネットワーク不要）"""
 import pytest
 from app.pipeline.analyzer import (
+    align_series,
     calculate_beta,
     calculate_volume_ratio,
     calculate_volatility,
@@ -99,3 +100,22 @@ class TestScoreIdiosyncratic:
         _, score_low_beta = score_idiosyncratic(None, None, 0.0)
         _, score_high_beta = score_idiosyncratic(None, None, 2.0)
         assert score_low_beta > score_high_beta
+
+
+class TestAlignSeries:
+    def test_aligns_by_common_dates_newest_first(self):
+        a = {"2026-07-01": 100.0, "2026-07-02": 101.0, "2026-07-03": 102.0}
+        b = {"2026-07-01": 50.0, "2026-07-03": 52.0}  # 07-02 は祝日で欠損
+        s, m = align_series(a, b, limit=90)
+        assert s == [102.0, 100.0]  # 新しい順・共通日付のみ
+        assert m == [52.0, 50.0]    # 位置ズレしない
+
+    def test_respects_limit(self):
+        a = {f"2026-07-{d:02d}": float(d) for d in range(1, 11)}
+        b = dict(a)
+        s, m = align_series(a, b, limit=3)
+        assert len(s) == len(m) == 3
+        assert s[0] == 10.0  # 最新から
+
+    def test_disjoint_dates_return_empty(self):
+        assert align_series({"2026-07-01": 1.0}, {"2026-07-02": 2.0}, 90) == ([], [])

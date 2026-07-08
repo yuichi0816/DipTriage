@@ -19,15 +19,42 @@ def _get_closes(df_prices: list[float]) -> np.ndarray:
     return np.array(df_prices, dtype=float)
 
 
-async def _fetch_close_series(session: AsyncSession, symbol: str, end_date: str, days: int) -> list[float]:
-    """DB から直近 days 日分の終値を取得する（新しい順）。"""
+async def _fetch_close_series(
+    session: AsyncSession, symbol: str, end_date: str, days: int, include_end: bool = True
+) -> list[float]:
+    """DB から直近 days 日分の終値を取得する（新しい順）。
+
+    include_end=False で end_date 当日を除外する（σ 推定から急落日を外す用途 — 監査 2-8）。
+    """
+    cond = StockPrice.date <= end_date if include_end else StockPrice.date < end_date
     result = await session.execute(
         select(StockPrice.close)
-        .where(StockPrice.symbol == symbol, StockPrice.date <= end_date)
+        .where(StockPrice.symbol == symbol, cond)
         .order_by(StockPrice.date.desc())
         .limit(days)
     )
     return [row[0] for row in result.fetchall()]
+
+
+async def _fetch_close_map(
+    session: AsyncSession, symbol: str, end_date: str, days: int
+) -> dict[str, float]:
+    """直近 days 日分の {date: close} を取得する（日付整列用 — 監査 2-7）。"""
+    result = await session.execute(
+        select(StockPrice.date, StockPrice.close)
+        .where(StockPrice.symbol == symbol, StockPrice.date <= end_date)
+        .order_by(StockPrice.date.desc())
+        .limit(days)
+    )
+    return {row[0]: row[1] for row in result.fetchall()}
+
+
+def align_series(
+    a: dict[str, float], b: dict[str, float], limit: int
+) -> tuple[list[float], list[float]]:
+    """2系列を共通日付で整列し（新しい順・最大 limit 件）、対応する終値リストを返す。"""
+    common = sorted(set(a) & set(b), reverse=True)[:limit]
+    return [a[d] for d in common], [b[d] for d in common]
 
 
 async def _fetch_volume_series(session: AsyncSession, symbol: str, end_date: str, days: int) -> list[float | None]:
@@ -186,27 +213,29 @@ async def analyze_dip_event(
     volumes = await _fetch_volume_series(session, event.symbol, trigger_date, 25)
     vol_ratio = calculate_volume_ratio(volumes, window=20)
 
-    # ボラティリティ
-    closes = await _fetch_close_series(session, event.symbol, trigger_date, 260)
-    sigma_annual, vol_dev = calculate_volatility(closes, event.change_pct_1d)
+    # ボラティリティ（σ には急落当日を含めない — 監査 2-8）
+    closes_hist = await _fetch_close_series(session, event.symbol, trigger_date, 260, include_end=False)
+    sigma_annual, vol_dev = calculate_volatility(closes_hist, event.change_pct_1d)
 
-    # β値（市場指数との相関）
-    market_sym = market_index
-    market_closes = await _fetch_close_series(session, market_sym, trigger_date, 260)
-    beta = calculate_beta(closes, market_closes) if market_closes else None
+    # β値（市場指数と日付で整列してから計算 — 監査 2-7）
+    stock_map = await _fetch_close_map(session, event.symbol, trigger_date, 260)
+    market_map = await _fetch_close_map(session, market_index, trigger_date, 260)
+    s_aligned, m_aligned = align_series(stock_map, market_map, 252)
+    beta = calculate_beta(s_aligned, m_aligned) if m_aligned else None
 
-    # セクター相対
+    # セクター相対（同じく日付整列）
     sector_change_pct = None
     sector_relative = None
     sector_corr_90d = None
     if sector_etf:
-        sector_closes = await _fetch_close_series(session, sector_etf, trigger_date, 95)
-        if len(sector_closes) >= 2:
-            sector_change_pct = (sector_closes[0] - sector_closes[1]) / sector_closes[1] * 100 if sector_closes[1] else None
-            if sector_change_pct is not None:
-                metrics = calculate_sector_metrics(closes, sector_closes, event.change_pct_1d, sector_change_pct)
-                sector_relative = metrics["sector_relative"]
-                sector_corr_90d = metrics["sector_corr_90d"]
+        sector_map = await _fetch_close_map(session, sector_etf, trigger_date, 95)
+        sec_desc = [sector_map[d] for d in sorted(sector_map, reverse=True)]
+        if len(sec_desc) >= 2 and sec_desc[1]:
+            sector_change_pct = (sec_desc[0] - sec_desc[1]) / sec_desc[1] * 100
+            s_al, sec_al = align_series(stock_map, sector_map, 90)
+            metrics = calculate_sector_metrics(s_al, sec_al, event.change_pct_1d, sector_change_pct)
+            sector_relative = metrics["sector_relative"]
+            sector_corr_90d = metrics["sector_corr_90d"]
 
     # 銘柄固有性スコア
     is_idiosyncratic, idiosyncratic_score = score_idiosyncratic(sector_relative, sector_corr_90d, beta)
